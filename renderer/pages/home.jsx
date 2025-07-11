@@ -30,16 +30,17 @@ export default function HomePage() {
             placeholder="Type your message..."
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            className="flex-grow border border-gray-300 rounded-l px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="flex-grow border border-gray-300 rounded-l px-4 py-2 focus:outline-none focus:ring-blue-500"
           />
           <button
             onClick={handleSend}
-            className="bg-blue-600 text-white px-4 py-2 rounded-r hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="bg-blue-600 text-white px-4 py-2 rounded-r hover:bg-blue-700 focus:outline-none focus:ring-blue-500"
           >
-            Send
+            ask
           </button>
         </div>
 
+        {/* these don't do anything rn */}
         <div className="flex space-x-4 mb-4">
           <button className="flex-1 py-2 bg-gray-200 rounded hover:bg-gray-300">
             Listen
@@ -53,7 +54,7 @@ export default function HomePage() {
         </div>
 
         <p className="text-gray-700">
-          <strong>Response:</strong> {message}
+          {message}
         </p>
       </div>
     </>
