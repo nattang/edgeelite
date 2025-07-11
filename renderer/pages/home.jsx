@@ -5,39 +5,57 @@ import Image from 'next/image'
 
 export default function HomePage() {
   const [message, setMessage] = React.useState('No message found')
+  const [inputValue, setInputValue] = React.useState('')
 
   React.useEffect(() => {
-    window.ipc.on('message', (message) => {
-      setMessage(message)
+    window.ipc.on('message', (msg) => {
+      setMessage(msg)
     })
   }, [])
 
+  const handleSend = () => {
+    window.ipc.send('message', 'Hello')
+  }
+
   return (
-    <React.Fragment>
+    <>
       <Head>
         <title>Home - Nextron (basic-lang-javascript)</title>
       </Head>
-      <div>
-        <p>
-          ⚡ Electron + Next.js ⚡ - <Link href="/next">Go to next page</Link>
+
+      <div className="p-6 max-w-md mx-auto">
+        <div className="flex mb-4">
+          <input
+            type="text"
+            placeholder="Type your message..."
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            className="flex-grow border border-gray-300 rounded-l px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            onClick={handleSend}
+            className="bg-blue-600 text-white px-4 py-2 rounded-r hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            Send
+          </button>
+        </div>
+
+        <div className="flex space-x-4 mb-4">
+          <button className="flex-1 py-2 bg-gray-200 rounded hover:bg-gray-300">
+            Listen
+          </button>
+          <button className="flex-1 py-2 bg-gray-200 rounded hover:bg-gray-300">
+            Capture
+          </button>
+          <button className="flex-1 py-2 bg-gray-200 rounded hover:bg-gray-300">
+            Write
+          </button>
+        </div>
+
+        <p className="text-gray-700">
+          <strong>Response:</strong> {message}
         </p>
-        <Image
-          src="/images/logo.png"
-          alt="Logo image"
-          width={256}
-          height={256}
-        />
       </div>
-      <div>
-        <button
-          onClick={() => {
-            window.ipc.send('message', 'Hello')
-          }}
-        >
-          Test IPC
-        </button>
-        <p>{message}</p>
-      </div>
-    </React.Fragment>
+    </>
   )
 }

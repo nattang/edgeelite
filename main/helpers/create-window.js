@@ -65,6 +65,7 @@ export const createWindow = (windowName, options) => {
   const win = new BrowserWindow({
     ...state,
     ...options,
+    frame: false,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
