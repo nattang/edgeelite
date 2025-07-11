@@ -37,7 +37,7 @@ export const createWindow = (windowName, options) => {
     const bounds = screen.getPrimaryDisplay().bounds
     return Object.assign({}, defaultSize, {
       x: (bounds.width - defaultSize.width) / 2,
-      y: (bounds.height - defaultSize.height) / 2,
+      y: 0,
     })
   }
 
@@ -71,6 +71,8 @@ export const createWindow = (windowName, options) => {
       ...options.webPreferences,
     },
   })
+
+  win.setMenuBarVisibility(false)
 
   win.on('close', saveState)
 
