@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.asr import process_audio
+from backend.asr_macos import process_audio
 
 app = FastAPI()
 
