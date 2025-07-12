@@ -3,6 +3,8 @@ import Head from 'next/head'
 import Link from 'next/link'
 import Image from 'next/image'
 
+import { sendCaptureRequest } from '../lib/capture'
+
 export default function HomePage() {
   const [message, setMessage] = React.useState('No message found')
   const [inputValue, setInputValue] = React.useState('')
@@ -15,6 +17,15 @@ export default function HomePage() {
 
   const handleSend = () => {
     window.ipc.send('message', 'Hello')
+  }
+
+  const handleCapture = async () => {
+    try {
+      const msg = await sendCaptureRequest()
+      setResponse(msg)
+    } catch (e) {
+      setResponse('Capture failed')
+    }
   }
 
   return (
