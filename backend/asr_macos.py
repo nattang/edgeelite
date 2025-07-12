@@ -34,7 +34,7 @@ special_tokens = {token: token_to_id[token] for token in special_tokens_map.get(
 special_tokens.update(added_tokens)
 
 def read_audio(filename):
-    AUDIO_DIR = os.path.join(os.path.dirname(__file__), "../app")
+    AUDIO_DIR = os.path.join(os.path.dirname(__file__), "../recordings")
     audio_path = os.path.join(AUDIO_DIR, filename)
     audio, file_sr = sf.read(audio_path)
     if len(audio.shape) > 1:
@@ -80,7 +80,7 @@ def decode_token_id(token_id):
 
 def chunk_audio(audio):
     chunk_size = int(SAMPLING_RATE * CHUNK_DURATION)
-    overlap = int(chunk_size * 0.1)
+    overlap = 0
     chunks = []
     for i in range(0, len(audio), chunk_size - overlap):
         chunk = audio[i:i + chunk_size]
