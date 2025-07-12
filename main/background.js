@@ -4,6 +4,7 @@ import serve from 'electron-serve'
 import { createWindow } from './helpers'
 import fs from 'fs'
 import os from 'os'
+import { startRecording, stopRecording } from './record.js'
 
 const isProd = process.env.NODE_ENV === 'production'
 
@@ -88,4 +89,14 @@ ipcMain.handle('take-screenshot', async () => {
       error: error.message
     }
   }
+})
+
+ipcMain.handle('audio:start', async () => {
+  return await startRecording()
+})
+
+ipcMain.handle('audio:stop', async () => {
+  console.log('Stopping audio recording...')
+  const filename = await stopRecording()
+  return filename
 })

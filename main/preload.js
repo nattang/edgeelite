@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, desktopCapturer } from 'electron'
 
+
 const handler = {
   send(channel, value) {
     ipcRenderer.send(channel, value)
@@ -18,7 +19,13 @@ const handler = {
 }
 
 contextBridge.exposeInMainWorld('ipc', handler)
+
 contextBridge.exposeInMainWorld('electronAPI', {
   desktopCapturer,
   takeScreenshot: () => ipcRenderer.invoke('take-screenshot'),
+})
+
+contextBridge.exposeInMainWorld('audio', {
+  startListening: () => ipcRenderer.invoke('audio:start'),
+  stopListening: () => ipcRenderer.invoke('audio:stop')
 })

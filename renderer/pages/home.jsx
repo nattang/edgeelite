@@ -2,12 +2,14 @@ import React from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
 import Image from 'next/image'
+import { sendListenRequest } from '../lib/audio'
 
 export default function HomePage() {
   const [message, setMessage] = React.useState('No message found')
   const [inputValue, setInputValue] = React.useState('')
   const [screenshot, setScreenshot] = React.useState(null)
   const [isCapturing, setIsCapturing] = React.useState(false)
+  const [isListening, setIsListening] = React.useState(false)
 
   React.useEffect(() => {
     window.ipc.on('message', (msg) => {
@@ -35,6 +37,27 @@ export default function HomePage() {
       setIsCapturing(false)
     }
   }
+  const handleListen = async () => {
+  if (!isListening) {
+    setIsListening(true)
+    setMessage('Listening...')
+    await window.audio.startListening()
+  } else {
+    setIsListening(false)
+    setMessage('Stopped. Processing...')
+
+    try {
+      console.log('Stopping audio recording...')
+      const filename = await window.audio.stopListening()
+      console.log('Audio file saved as:', filename)
+      const result = await sendListenRequest(filename)
+      setMessage(result)
+    } catch (err) {
+      console.error('Error in sendListenRequest:', err)
+      setMessage('Failed to process audio')
+    }
+  }
+}
 
   return (
     <>
@@ -60,8 +83,11 @@ export default function HomePage() {
         </div>
 
         <div className="flex space-x-4 mb-4">
-          <button className="flex-1 py-2 bg-gray-200 rounded hover:bg-gray-300">
-            Listen
+          <button
+            className="flex-1 py-2 bg-gray-200 rounded hover:bg-gray-300"
+            onClick={handleListen}
+          >
+            {isListening ? 'Stop' : 'Listen'}
           </button>
           <button 
             onClick={handleCapture}
