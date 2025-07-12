@@ -21,19 +21,18 @@ export default function HomePage() {
 
   const handleListen = async () => {
   if (!isListening) {
-    console.log('uno')
     setIsListening(true)
     setMessage('Listening...')
-    // trigger actual microphone capture later
+    await window.audio.startListening()
   } else {
-    console.log('dos')
     setIsListening(false)
     setMessage('Stopped. Processing...')
 
     try {
-      console.log('hi')
-      const result = await sendListenRequest()
-      console.log('✅ Received from ASR backend:', result)
+      console.log('Stopping audio recording...')
+      const filename = await window.audio.stopListening()
+      console.log('Audio file saved as:', filename)
+      const result = await sendListenRequest(filename)
       setMessage(result)
     } catch (err) {
       console.error('Error in sendListenRequest:', err)

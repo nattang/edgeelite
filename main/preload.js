@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
+
 const handler = {
   send(channel, value) {
     ipcRenderer.send(channel, value)
@@ -15,3 +16,8 @@ const handler = {
 }
 
 contextBridge.exposeInMainWorld('ipc', handler)
+
+contextBridge.exposeInMainWorld('audio', {
+  startListening: () => ipcRenderer.invoke('audio:start'),
+  stopListening: () => ipcRenderer.invoke('audio:stop')
+})
