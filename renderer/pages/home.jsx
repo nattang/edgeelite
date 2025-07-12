@@ -6,7 +6,6 @@ import Image from 'next/image'
 export default function HomePage() {
   const [message, setMessage] = React.useState('No message found')
   const [inputValue, setInputValue] = React.useState('')
-  const [isListening, setIsListening] = React.useState(false)
 
   React.useEffect(() => {
     window.ipc.on('message', (msg) => {
@@ -17,21 +16,6 @@ export default function HomePage() {
   const handleSend = () => {
     window.ipc.send('message', 'Hello')
   }
-
-  const handleListen = async () => {
-  if (!isListening) {
-    const msg = await window.audio.startListening()
-    setMessage(msg)
-  } else {
-    try {
-      const result = await window.audio.stopListeningAndSend()
-      setMessage(result.text || 'No transcription')
-    } catch (e) {
-      setMessage('Error: ' + e)
-    }
-  }
-  setIsListening(!isListening)
-}
 
   return (
     <>
@@ -58,13 +42,8 @@ export default function HomePage() {
 
         {/* these don't do anything rn */}
         <div className="flex space-x-4 mb-4">
-          <button
-            onClick={handleListen}
-            className={`flex-1 py-2 rounded hover:bg-gray-300 ${
-              isListening ? 'bg-red-500 text-white' : 'bg-gray-200'
-            }`}
-          >
-            {isListening ? 'Stop' : 'Listen'}
+          <button className="flex-1 py-2 bg-gray-200 rounded hover:bg-gray-300">
+            Listen
           </button>
           <button className="flex-1 py-2 bg-gray-200 rounded hover:bg-gray-300">
             Capture
