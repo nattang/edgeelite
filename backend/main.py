@@ -1,6 +1,8 @@
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from backend.ocr import CaptureRequest, process_image
 from backend.asr import process_audio
+from fastapi.middleware.cors import CORSMiddleware
+
 
 app = FastAPI()
 
@@ -26,3 +28,8 @@ async def asr():
     print("🎤 Received ASR trigger request")
     result = process_audio("temp_audio.wav") 
     return {"message": result}
+@app.post("/capture")
+async def capture(data: CaptureRequest):
+    print(f"Received capture request for: {data.filename}")
+    process_image(data.filename)
+    return {"message": f"Processed {data.filename}"}

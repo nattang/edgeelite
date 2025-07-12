@@ -4,6 +4,8 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { sendListenRequest } from '../lib/audio'
 
+import { sendCaptureRequest } from '../lib/capture'
+
 export default function HomePage() {
   const [message, setMessage] = React.useState('No message found')
   const [inputValue, setInputValue] = React.useState('')
