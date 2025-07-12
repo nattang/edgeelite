@@ -1,7 +1,9 @@
 import path from 'path'
-import { app, ipcMain } from 'electron'
+import { app, ipcMain, desktopCapturer, BrowserWindow } from 'electron'
 import serve from 'electron-serve'
 import { createWindow } from './helpers'
+import fs from 'fs'
+import os from 'os'
 import { startRecording, stopRecording } from './record.js'
 
 const isProd = process.env.NODE_ENV === 'production'
@@ -40,10 +42,58 @@ ipcMain.on('message', async (event, arg) => {
   event.reply('message', `${arg} World!`)
 })
 
+ipcMain.handle('take-screenshot', async () => {
+  try {
+    // Get all screen sources
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: 1920, height: 1080 }
+    })
+
+    if (sources.length === 0) {
+      throw new Error('No screen sources found')
+    }
+
+    // Get the primary display
+    const primarySource = sources.find(source => source.display_id === '0:0') || sources[0]
+    
+    // Convert the thumbnail to base64
+    const image = primarySource.thumbnail.toDataURL()
+    
+    // Save image to captures folder
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const capturesDir = path.join(os.homedir(), 'EdgeElite', 'captures')
+    
+    // Create captures directory if it doesn't exist
+    if (!fs.existsSync(capturesDir)) {
+      fs.mkdirSync(capturesDir, { recursive: true })
+    }
+    
+    const imagePath = path.join(capturesDir, `screenshot-${timestamp}.png`)
+    
+    // Convert base64 to buffer and save
+    const base64Data = image.replace(/^data:image\/png;base64,/, '')
+    const buffer = Buffer.from(base64Data, 'base64')
+    fs.writeFileSync(imagePath, buffer)
+    
+    return {
+      success: true,
+      image: image,
+      timestamp: new Date().toISOString(),
+      filePath: imagePath
+    }
+  } catch (error) {
+    console.error('Screenshot error:', error)
+    return {
+      success: false,
+      error: error.message
+    }
+  }
+})
+
 ipcMain.handle('audio:start', async () => {
   return await startRecording()
 })
-
 
 ipcMain.handle('audio:stop', async () => {
   console.log('Stopping audio recording...')
@@ -51,3 +101,27 @@ ipcMain.handle('audio:stop', async () => {
   return filename
 })
 
+ipcMain.handle('save-audio-file', async (event, audioBuffer) => {
+  try {
+    // audioBuffer is now a Uint8Array, convert to Buffer
+    const buffer = Buffer.from(audioBuffer)
+    
+    // Save to recordings folder (similar to captures)
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const recordingsDir = path.join(os.homedir(), 'EdgeElite', 'recordings')
+    
+    // Create recordings directory if it doesn't exist
+    if (!fs.existsSync(recordingsDir)) {
+      fs.mkdirSync(recordingsDir, { recursive: true })
+    }
+    
+    const audioPath = path.join(recordingsDir, `audio-${timestamp}.wav`)
+    fs.writeFileSync(audioPath, buffer)
+    
+    console.log('Audio file saved:', audioPath, 'size:', buffer.length, 'bytes')
+    return 'temp_audio.wav' // Keep the same return for backend compatibility
+  } catch (error) {
+    console.error('Error saving audio file:', error)
+    throw error
+  }
+})
