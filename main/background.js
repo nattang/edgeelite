@@ -100,3 +100,28 @@ ipcMain.handle('audio:stop', async () => {
   const filename = await stopRecording()
   return filename
 })
+
+ipcMain.handle('save-audio-file', async (event, audioBuffer) => {
+  try {
+    // audioBuffer is now a Uint8Array, convert to Buffer
+    const buffer = Buffer.from(audioBuffer)
+    
+    // Save to recordings folder (similar to captures)
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const recordingsDir = path.join(os.homedir(), 'EdgeElite', 'recordings')
+    
+    // Create recordings directory if it doesn't exist
+    if (!fs.existsSync(recordingsDir)) {
+      fs.mkdirSync(recordingsDir, { recursive: true })
+    }
+    
+    const audioPath = path.join(recordingsDir, `audio-${timestamp}.wav`)
+    fs.writeFileSync(audioPath, buffer)
+    
+    console.log('Audio file saved:', audioPath, 'size:', buffer.length, 'bytes')
+    return 'temp_audio.wav' // Keep the same return for backend compatibility
+  } catch (error) {
+    console.error('Error saving audio file:', error)
+    throw error
+  }
+})

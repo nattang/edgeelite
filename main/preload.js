@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('ipc', handler)
 contextBridge.exposeInMainWorld('electronAPI', {
   desktopCapturer,
   takeScreenshot: () => ipcRenderer.invoke('take-screenshot'),
+  saveAudioFile: (audioBlob) => ipcRenderer.invoke('save-audio-file', audioBlob),
 })
 
 contextBridge.exposeInMainWorld('audio', {

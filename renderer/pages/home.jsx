@@ -2,7 +2,7 @@ import React from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
 import Image from 'next/image'
-import { sendListenRequest } from '../lib/audio'
+import { startRecording, stopRecording, sendListenRequest } from '../lib/audio'
 
 import { sendCaptureRequest } from '../lib/capture'
 
@@ -39,27 +39,33 @@ export default function HomePage() {
       setIsCapturing(false)
     }
   }
+  
   const handleListen = async () => {
-  if (!isListening) {
-    setIsListening(true)
-    setMessage('Listening...')
-    await window.audio.startListening()
-  } else {
-    setIsListening(false)
-    setMessage('Stopped. Processing...')
+    if (!isListening) {
+      setIsListening(true)
+      setMessage('Listening...')
+      try {
+        await startRecording()
+      } catch (error) {
+        setMessage(`Failed to start recording: ${error.message}`)
+        setIsListening(false)
+      }
+    } else {
+      setIsListening(false)
+      setMessage('Stopped. Processing...')
 
-    try {
-      console.log('Stopping audio recording...')
-      const filename = await window.audio.stopListening()
-      console.log('Audio file saved as:', filename)
-      const result = await sendListenRequest(filename)
-      setMessage(result)
-    } catch (err) {
-      console.error('Error in sendListenRequest:', err)
-      setMessage('Failed to process audio')
+      try {
+        console.log('Stopping audio recording...')
+        const filename = await stopRecording()
+        console.log('Audio file saved as:', filename)
+        const result = await sendListenRequest(filename)
+        setMessage(result)
+      } catch (err) {
+        console.error('Error in sendListenRequest:', err)
+        setMessage('Failed to process audio')
+      }
     }
   }
-}
 
   return (
     <>
