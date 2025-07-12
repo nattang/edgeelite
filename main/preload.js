@@ -1,4 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import * as audio from './audio'
+
+contextBridge.exposeInMainWorld('audio', audio)
 
 const handler = {
   send(channel, value) {
