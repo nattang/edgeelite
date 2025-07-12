@@ -22,9 +22,9 @@ export default function HomePage() {
   const handleCapture = async () => {
     try {
       const msg = await sendCaptureRequest()
-      setResponse(msg)
+      setMessage(msg)
     } catch (e) {
-      setResponse('Capture failed')
+      setMessage('Capture failed')
     }
   }
 
@@ -56,7 +56,10 @@ export default function HomePage() {
           <button className="flex-1 py-2 bg-gray-200 rounded hover:bg-gray-300">
             Listen
           </button>
-          <button className="flex-1 py-2 bg-gray-200 rounded hover:bg-gray-300">
+          <button 
+            className="flex-1 py-2 bg-gray-200 rounded hover:bg-gray-300"
+            onClick={handleCapture}
+          >
             Capture
           </button>
           <button className="flex-1 py-2 bg-gray-200 rounded hover:bg-gray-300">
