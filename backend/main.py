@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from backend.ocr import CaptureRequest, process_image
-from backend.asr import process_audio
+#from backend.asr import process_audio
 from backend.llm import llm_service
+from backend.asr_macos import process_audio
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
@@ -54,26 +55,27 @@ def read_root():
 async def asr():
     print("🎤 Received ASR trigger request")
     
-    # Look for the most recent audio file in the recordings folder
     recordings_dir = os.path.join(os.path.expanduser("~"), "EdgeElite", "recordings")
-    
+    msg = ""
+
     if os.path.exists(recordings_dir):
-        # Get the most recent .wav file
         wav_files = [f for f in os.listdir(recordings_dir) if f.endswith('.wav')]
         if wav_files:
-            # Sort by modification time (newest first)
             wav_files.sort(key=lambda x: os.path.getmtime(os.path.join(recordings_dir, x)), reverse=True)
             latest_audio_file = os.path.join(recordings_dir, wav_files[0])
             print(f"🎤 Processing latest audio file: {latest_audio_file}")
             result = process_audio(latest_audio_file)
+            print(result)
+            msg = " ".join([r["text"] for r in result]).strip()
+            print(f"🎤 Transcription result: {msg}")
         else:
             print("🎤 No audio files found in recordings directory")
-            result = "No audio file found"
+            msg = "No audio file found"
     else:
         print("🎤 Recordings directory not found")
-        result = "Recordings directory not found"
+        msg = "Recordings directory not found"
     
-    return {"message": result}
+    return {"message": msg}
 
 @app.post("/capture")
 async def capture(data: CaptureRequest):
