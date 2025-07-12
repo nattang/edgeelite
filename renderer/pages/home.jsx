@@ -2,10 +2,12 @@ import React from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
 import Image from 'next/image'
+import { sendListenRequest } from '../lib/audio'
 
 export default function HomePage() {
   const [message, setMessage] = React.useState('No message found')
   const [inputValue, setInputValue] = React.useState('')
+  const [isListening, setIsListening] = React.useState(false)
 
   React.useEffect(() => {
     window.ipc.on('message', (msg) => {
@@ -16,6 +18,29 @@ export default function HomePage() {
   const handleSend = () => {
     window.ipc.send('message', 'Hello')
   }
+
+  const handleListen = async () => {
+  if (!isListening) {
+    console.log('uno')
+    setIsListening(true)
+    setMessage('Listening...')
+    // trigger actual microphone capture later
+  } else {
+    console.log('dos')
+    setIsListening(false)
+    setMessage('Stopped. Processing...')
+
+    try {
+      console.log('hi')
+      const result = await sendListenRequest()
+      console.log('✅ Received from ASR backend:', result)
+      setMessage(result)
+    } catch (err) {
+      console.error('Error in sendListenRequest:', err)
+      setMessage('Failed to process audio')
+    }
+  }
+}
 
   return (
     <>
@@ -42,8 +67,11 @@ export default function HomePage() {
 
         {/* these don't do anything rn */}
         <div className="flex space-x-4 mb-4">
-          <button className="flex-1 py-2 bg-gray-200 rounded hover:bg-gray-300">
-            Listen
+          <button
+            className="flex-1 py-2 bg-gray-200 rounded hover:bg-gray-300"
+            onClick={handleListen}
+          >
+            {isListening ? 'Stop' : 'Listen'}
           </button>
           <button className="flex-1 py-2 bg-gray-200 rounded hover:bg-gray-300">
             Capture
