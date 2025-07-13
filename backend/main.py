@@ -86,8 +86,8 @@ async def asr():
 async def capture(data: CaptureRequest):
     print(f"Received capture request for: {data.filename}")
     # TODO: add processed image to database w session id
-    process_image(data.filename)
-    return {"message": f"Processed {data.filename}"}
+    message  = process_image(data.filename)
+    return {"message": f"Text: {message}"}
 
 @app.post("/api/query")
 async def query_llm(request: QueryRequest):

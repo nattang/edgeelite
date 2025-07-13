@@ -5,7 +5,10 @@ export const sendCaptureRequest = async (filename, sessionId = null) => {
     const res = await fetch('http://localhost:8000/capture', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename })
+      body: JSON.stringify({ 
+        filename: filename,
+        sessionId: sessionId
+       })
     })
 
     if (!res.ok) {
@@ -29,7 +32,6 @@ export const sendCaptureRequest = async (filename, sessionId = null) => {
         // Don't fail the capture if event storage fails
       }
     }
-
     return data
   } catch (error) {
     console.error('Capture error:', error)
