@@ -49,6 +49,19 @@ class JournalRequest(BaseModel):
     class Config:
         allow_population_by_field_name = True
 
+class RecallRequest(BaseModel):
+    session_id: str = Field(alias="sessionId")
+    query_text: str = Field(alias="queryText")
+    
+    class Config:
+        allow_population_by_field_name = True
+
+class RecallResponse(BaseModel):
+    answer: str
+    sources: List[Dict[str, Any]]
+    confidence: float
+    session_id: str
+
 app = FastAPI()
 
 origins = [
@@ -149,6 +162,34 @@ async def run_journal_pipeline(session_id: str):
     except Exception as e:
         print(f"❌ Journal pipeline error for session {session_id}: {e}")
         journal_cache[session_id] = {"error": str(e)}
+
+def extract_question_from_text(text: str) -> str:
+    """
+    Extract the actual question from voice input.
+    Looks for patterns like "What did I say about X" or "Remind me about Y"
+    """
+    import re
+    
+    # Common recall question patterns
+    patterns = [
+        r"what did i say about (.+?)(?:\?|$)",
+        r"remind me (?:about|what) (.+?)(?:\?|$)", 
+        r"what was (?:mentioned|said) about (.+?)(?:\?|$)",
+        r"tell me about (.+?)(?:\?|$)",
+        r"recall (.+?)(?:\?|$)",
+        r"edgeelite.*?about (.+?)(?:\?|$)"
+    ]
+    
+    text_lower = text.lower()
+    
+    for pattern in patterns:
+        match = re.search(pattern, text_lower)
+        if match:
+            topic = match.group(1).strip()
+            return f"What was mentioned about {topic}?"
+    
+    # If no pattern matched, return the original text
+    return text
 
 @app.get("/")
 def read_root():
@@ -305,3 +346,76 @@ async def get_journal(request: JournalRequest):
         return {"status": "done", "session_id": session_id, **entry}
     else:
         return {"status": "processing", "session_id": session_id}
+
+@app.post("/api/recall")
+async def handle_recall(request: RecallRequest):
+    """
+    Handle context recall queries using RAG pipeline.
+    Returns immediate response without storing anything.
+    """
+    try:
+        session_id = request.session_id
+        query_text = request.query_text
+        
+        print(f"🔍 Received recall query for session: {session_id}")
+        print(f"🎯 Query text: {query_text}")
+        
+        # Extract question from query text
+        extracted_query = extract_question_from_text(query_text)
+        print(f"🧠 Extracted query: {extracted_query}")
+        
+        # Search for relevant context using existing RAG pipeline
+        from storage.interface import search_similar
+        search_results = search_similar(extracted_query, k=5)
+        
+        print(f"📚 Found {len(search_results)} relevant results")
+        
+        # Generate response using LLM
+        if search_results:
+            # Build context from search results
+            context_sections = []
+            for i, (summary, content) in enumerate(search_results, 1):
+                context_sections.append(f"Context {i}: {content}")
+            
+            context_text = "\n\n".join(context_sections)
+            
+            prompt = f"""
+            User just asked: "{extracted_query}"
+            
+            Relevant information from earlier:
+            {context_text}
+            
+            Task: Write a short, helpful answer to the user's question using the context above.
+            - Be conversational and natural
+            - Reference specific details from the context
+            - If the context doesn't fully answer the question, say so
+            - Keep response under 50 words
+            """
+            
+            answer = llm_service.generate_response(prompt, [])
+        else:
+            answer = "I don't have any relevant information about that topic from your previous conversations."
+        
+        # Format sources for frontend
+        sources = []
+        for summary, content in search_results:
+            sources.append({
+                "summary": summary,
+                "content": content[:200] + "..." if len(content) > 200 else content
+            })
+        
+        return RecallResponse(
+            answer=answer,
+            sources=sources,
+            confidence=0.8 if search_results else 0.2,
+            session_id=session_id
+        )
+        
+    except Exception as e:
+        print(f"❌ Recall processing error: {e}")
+        return RecallResponse(
+            answer="I'm sorry, I encountered an error while trying to recall that information.",
+            sources=[],
+            confidence=0.0,
+            session_id=request.session_id
+        )
