@@ -1,7 +1,12 @@
 from fastapi import FastAPI
-from backend.ocr import CaptureRequest, process_image
+from backend.ocr.ocr import process_image
 from fastapi.middleware.cors import CORSMiddleware
-
+import base64
+import io
+from PIL import Image
+import os
+from pathlib import Path
+from pydantic import BaseModel  
 
 app = FastAPI()
 
@@ -22,6 +27,9 @@ app.add_middleware(
 @app.get("/")
 def read_root():
     return {"message": "Hello from FastAPI!"}
+
+class CaptureRequest(BaseModel):
+    filename: str
 
 @app.post("/capture")
 async def capture(data: CaptureRequest):
