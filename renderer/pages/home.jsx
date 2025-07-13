@@ -5,7 +5,7 @@ import Image from 'next/image'
 import { startRecording, stopRecording, sendListenRequest } from '../lib/audio'
 import { sendCaptureRequest } from '../lib/capture'
 import { api } from '../lib/api'
-import { VoiceQueryManager } from '../lib/voice-query'
+
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = React.useState('journal')
@@ -25,10 +25,7 @@ export default function HomePage() {
   const [showRelatedModal, setShowRelatedModal] = React.useState(false)
   const [selectedRelatedMemory, setSelectedRelatedMemory] = React.useState(null)
 
-  // Recall state
-  const [isVoiceListening, setIsVoiceListening] = React.useState(false)
-  const [assistantResponse, setAssistantResponse] = React.useState(null)
-  const [voiceQueryManager] = React.useState(() => new VoiceQueryManager())
+
   
   // Recall tab specific state
   const [recallSessionId, setRecallSessionId] = React.useState(null)
@@ -36,6 +33,7 @@ export default function HomePage() {
   const [recallQuery, setRecallQuery] = React.useState('')
   const [recallResponse, setRecallResponse] = React.useState(null)
   const [isRecallProcessing, setIsRecallProcessing] = React.useState(false)
+  const [assistantResponse, setAssistantResponse] = React.useState(null)
 
   React.useEffect(() => {
     window.ipc.on('message', (msg) => {
@@ -67,11 +65,21 @@ export default function HomePage() {
     return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
   }
 
-  const startSession = () => {
+  const startSession = async () => {
     const newSessionId = generateSessionId()
     setSessionId(newSessionId)
     setIsSessionActive(true)
-    setMessage(`Session started: ${newSessionId}`)
+    
+    // Auto-start recording when session starts
+    try {
+      await startRecording()
+      setIsListening(true)
+      setMessage(`Session started: ${newSessionId} - Recording...`)
+    } catch (error) {
+      console.error('Failed to start recording:', error)
+      setMessage(`Session started: ${newSessionId} - Recording failed to start: ${error.message}`)
+      setIsListening(false)
+    }
   }
 
   const endSession = async () => {
@@ -81,6 +89,23 @@ export default function HomePage() {
     setIsProcessing(true)
     
     try {
+      // Stop recording and process audio first (if recording was active)
+      if (isListening) {
+        setMessage('Stopping recording and processing audio...')
+        try {
+          console.log('Stopping audio recording...')
+          const filename = await stopRecording()
+          console.log('Audio file saved as:', filename)
+          const result = await sendListenRequest(filename, sessionId)
+          console.log('Audio processing result:', result)
+          setIsListening(false)
+        } catch (audioError) {
+          console.error('Error processing audio:', audioError)
+          setMessage('Audio processing failed, but continuing with journal...')
+          setIsListening(false)
+        }
+      }
+      
       // End session and start journal processing
       await api.endSession(sessionId)
       
@@ -130,27 +155,7 @@ export default function HomePage() {
     }
   }
 
-  const handleListen = async () => {
-    if (!isSessionActive) {
-      setMessage('Please start a session first')
-      return
-    }
 
-    if (isListening) {
-      stopRecording()
-      setIsListening(false)
-      setMessage('Stopped listening')
-    } else {
-      try {
-        await startRecording()
-        setIsListening(true)
-        setMessage('Listening...')
-      } catch (error) {
-        console.error('Audio recording error:', error)
-        setMessage(`Audio error: ${error.message}`)
-      }
-    }
-  }
 
   const handleSummarize = async () => {
     if (!sessionId) {
@@ -172,33 +177,7 @@ export default function HomePage() {
     }
   }
 
-  const startVoiceRecall = async () => {
-    const recallSessionId = `recall_session_${Date.now()}`
-    
-    try {
-      await voiceQueryManager.startContinuousListening(recallSessionId, (response) => {
-        setAssistantResponse(response)
-        
-        if (response) {
-          setMessage(`Query processed: "${response.answer}"`)
-        }
-      })
-      
-      setIsVoiceListening(true)
-      setMessage('Voice recall started - say "EdgeElite, what did I say about..."')
-      
-    } catch (error) {
-      console.error('Voice recall start error:', error)
-      setMessage(`Voice recall error: ${error.message}`)
-    }
-  }
 
-  const stopVoiceRecall = () => {
-    voiceQueryManager.stopListening()
-    setIsVoiceListening(false)
-    setAssistantResponse(null)
-    setMessage('Voice recall stopped')
-  }
 
   // Recall tab session functions
   const startRecallSession = () => {
@@ -212,6 +191,7 @@ export default function HomePage() {
     setIsRecallSessionActive(false)
     setRecallSessionId(null)
     setRecallResponse(null)
+    setAssistantResponse(null)
     setMessage('Recall session ended')
   }
 
@@ -261,6 +241,7 @@ export default function HomePage() {
     try {
       const response = await api.contextRecall(recallSessionId, recallQuery)
       setRecallResponse(response)
+      setAssistantResponse(response) // Show in assistant bubble
       setMessage('Recall query processed successfully')
       setRecallQuery('') // Clear the query after successful submission
     } catch (error) {
@@ -291,6 +272,16 @@ export default function HomePage() {
               Session ID: {sessionId}
             </div>
           )}
+          {isSessionActive && (
+            <div className="flex items-center mt-2">
+              <span className="text-sm font-medium mr-2">Recording:</span>
+              <span className={`px-2 py-1 rounded-full text-xs ${
+                isListening ? 'bg-red-200 text-red-800' : 'bg-yellow-200 text-yellow-800'
+              }`}>
+                {isListening ? '🔴 Recording' : '⚠️ Not Recording'}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Control Buttons */}
@@ -304,7 +295,7 @@ export default function HomePage() {
                 : 'bg-blue-600 text-white hover:bg-blue-700'
             } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
-            {isProcessing ? 'Processing...' : isSessionActive ? 'End Session' : 'Start Session'}
+            {isProcessing ? 'Processing...' : isSessionActive ? 'End Session & Create Journal' : 'Start Session & Recording'}
           </button>
 
           <button
@@ -313,18 +304,6 @@ export default function HomePage() {
             className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400"
           >
             {isCapturing ? 'Capturing...' : '📸 Screenshot'}
-          </button>
-
-          <button
-            onClick={handleListen}
-            disabled={!isSessionActive}
-            className={`px-4 py-2 rounded-lg font-medium ${
-              isListening
-                ? 'bg-red-600 text-white hover:bg-red-700'
-                : 'bg-purple-600 text-white hover:bg-purple-700'
-            } disabled:bg-gray-400`}
-          >
-            {isListening ? '🛑 Stop Recording' : '🎤 Start Recording'}
           </button>
         </div>
 
@@ -580,6 +559,7 @@ export default function HomePage() {
             </div>
           </div>
         )}
+
       </div>
     </div>
   )
