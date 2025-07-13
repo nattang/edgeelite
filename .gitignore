@@ -11,3 +11,7 @@ next-env.d.ts
 # build
 /app
 dist
+
+# place to store data before database is setup
+backend/temp_data/*
+!backend/temp_data/.gitkeep
