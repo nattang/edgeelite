@@ -51,7 +51,7 @@ qnn_provider_options = {"backend_path": hexagon_driver}
 
 # Session options
 so = ort.SessionOptions()
-so.enable_profiling = True
+so.enable_profiling = False  # Disable profiling to reduce file clutter
 so.log_severity_level = 3
 
 # Encoder/Decoder sessions (lazy init)
