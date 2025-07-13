@@ -172,6 +172,7 @@ def run_easyocr_ort(image_path: str):
         recognized_texts.append(text)
 
     full_text = "\n".join(recognized_texts)
+    # full_text = ocr.extract_recognizable_words(full_text)
     print("results: ", full_text)
     return full_text
 
