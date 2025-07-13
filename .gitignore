@@ -15,3 +15,15 @@ dist
 # place to store data before database is setup
 backend/temp_data/*
 !backend/temp_data/.gitkeep
+
+venv
+venv/
+backend/storage/faiss_index/*
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so

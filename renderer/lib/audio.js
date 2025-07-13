@@ -1,4 +1,6 @@
 // Web Audio API-based recording system
+import { api } from './api.js'
+
 let mediaRecorder = null
 let audioChunks = []
 let isRecording = false
@@ -159,13 +161,14 @@ function audioBufferToWav(buffer) {
   return arrayBuffer
 }
 
-export async function sendListenRequest(filename) {
+//ASR CAPTURE TRIGGER TO BACKEND
+export async function sendListenRequest(filename, sessionId = null) {
   const res = await fetch('http://localhost:8000/asr', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ filename }),
+    body: JSON.stringify({ sessionId }),
   })
 
   if (!res.ok) {
@@ -173,7 +176,23 @@ export async function sendListenRequest(filename) {
   }
 
   const data = await res.json()
-  console.log('Backend responded with:', data)
+  
+  // Store event if session is active
+  if (sessionId) {
+    try {
+      await api.storeEvent(sessionId, 'asr', data.message || 'Audio transcribed', {
+        filename,
+        timestamp: new Date().toISOString(),
+        type: 'audio',
+        source: 'asr'
+      })
+      console.log('ASR event stored for session:', sessionId)
+    } catch (eventError) {
+      console.warn('Failed to store ASR event:', eventError.message)
+      // Don't fail the ASR if event storage fails
+    }
+  }
+
   return data.message
 }
 
