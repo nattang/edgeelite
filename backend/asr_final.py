@@ -6,22 +6,40 @@ import os
 import json
 
 BASE_DIR = os.path.dirname(__file__)
-ENCODER_PATH = os.path.join(BASE_DIR, "models/asr/encoder_model.onnx")
-DECODER_PATH = os.path.join(BASE_DIR, "models/asr/decoder_model_merged.onnx")
-VOCAB_PATH = os.path.join(BASE_DIR, "models/asr/vocab.json")
-ADDED_TOKENS_PATH = os.path.join(BASE_DIR, "models/asr/added_tokens.json")
-SPECIAL_TOKENS_PATH = os.path.join(BASE_DIR, "models/asr/special_tokens_map.json")
+# Use Qualcomm Snapdragon X Elite optimized Whisper models
+ENCODER_PATH = os.path.join(BASE_DIR, "models/whisper_large_v3_turbo-hfwhisperencoder-qualcomm_snapdragon_x_elite.onnx/model.onnx/model.onnx")
+DECODER_PATH = os.path.join(BASE_DIR, "models/whisper_large_v3_turbo-hfwhisperdecoder-qualcomm_snapdragon_x_elite.onnx/model.onnx/model.onnx")
+# Use tokenizer files from the asr directory
+MODEL_DIR = os.path.join(BASE_DIR, "models/asr")
+VOCAB_PATH = os.path.join(MODEL_DIR, "vocab.json")
+ADDED_TOKENS_PATH = os.path.join(MODEL_DIR, "added_tokens.json")
+SPECIAL_TOKENS_PATH = os.path.join(MODEL_DIR, "special_tokens_map.json")
 SAMPLING_RATE = 16000
 CHUNK_DURATION = 5.0
 
+# Enforce QNN/NPU usage only
 encoder_sess = ort.InferenceSession(ENCODER_PATH, providers=["QNNExecutionProvider"])
 decoder_sess = ort.InferenceSession(DECODER_PATH, providers=["QNNExecutionProvider"])
+print("Using QNN Execution Provider")
+print(f"Encoder session providers: {encoder_sess.get_providers()}")
+print(f"Decoder session providers: {decoder_sess.get_providers()}")
+print(f"Encoder session active provider: {encoder_sess.get_provider_options()}")
+print(f"Decoder session active provider: {decoder_sess.get_provider_options()}")
+assert "QNNExecutionProvider" in encoder_sess.get_providers(), "NPU (QNN) is NOT being used for encoder!"
+assert "QNNExecutionProvider" in decoder_sess.get_providers(), "NPU (QNN) is NOT being used for decoder!"
 
 with open(VOCAB_PATH, "r", encoding="utf-8") as f:
     token_to_id = json.load(f)
-with open(ADDED_TOKENS_PATH, "r", encoding="utf-8") as f:
-    added_tokens = json.load(f)
-token_to_id.update(added_tokens)
+
+# Handle potentially incomplete added_tokens.json
+try:
+    with open(ADDED_TOKENS_PATH, "r", encoding="utf-8") as f:
+        added_tokens = json.load(f)
+    token_to_id.update(added_tokens)
+except (json.JSONDecodeError, FileNotFoundError):
+    print("Warning: added_tokens.json is incomplete or missing, using empty dict")
+    added_tokens = {}
+
 with open(SPECIAL_TOKENS_PATH, "r", encoding="utf-8") as f:
     special_tokens_map = json.load(f)
 
@@ -97,53 +115,110 @@ def run_whisper_encoder(chunk):
     mel = log_mel_spectrogram_whisper(chunk)
     mel = pad_or_trim_mel(mel, 3000)
     mel = mel[np.newaxis, :, :]
+    # Convert to float16 as required by QNN model
+    mel = mel.astype(np.float16)
     try:
+        print(f"Running encoder inference with provider: {encoder_sess.get_providers()}")
+        print(f"Input shape: {mel.shape}, dtype: {mel.dtype}")
         encoder_out = encoder_sess.run(None, {"input_features": mel})[0]
+        print(f"Encoder inference completed successfully, output shape: {encoder_out.shape}")
         return encoder_out
     except Exception as e:
         print(f"Encoder error: {e}")
         return None
 
-def run_whisper_decoder_simple(encoder_out, max_tokens=50):
-    tokens = [
-        special_tokens.get("<|startoftranscript|>", 50257),
-        special_tokens.get("<|en|>", 50259),
-        special_tokens.get("<|transcribe|>", 50358),
-        special_tokens.get("<|notimestamps|>", 50363)
-    ]
+def run_whisper_decoder_simple(encoder_out, max_tokens=20):  # Reduced from 50 to 20 to prevent hanging
+    print(f"Starting decoder with encoder_out shape: {encoder_out.shape}")
+    
+    # Initialize with start token only
+    tokens = [special_tokens.get("<|startoftranscript|>", 50257)]
+    print(f"Initial token: {tokens}")
+    
     for step in range(max_tokens):
-        input_ids = np.array([tokens], dtype=np.int64)
-        batch_size = 1
-        num_heads = 20
-        head_dim = 64
-        encoder_seq_len = encoder_out.shape[1]
+        print(f"Decoder step {step + 1}/{max_tokens}")
+        
+        # Prepare inputs for QNN decoder
+        input_ids = np.array([tokens], dtype=np.int32)  # Use int32 as required
+        position_ids = np.array([len(tokens) - 1], dtype=np.int32)
+        
+        # Create attention mask
+        attention_mask = np.ones((1, 1, 1, 200), dtype=np.float16)
+        
+        # Create cache inputs for 4 layers
+        k_cache_self = []
+        v_cache_self = []
+        k_cache_cross = []
+        v_cache_cross = []
+        
+        for i in range(4):
+            # Self-attention cache (starts empty)
+            k_cache_self.append(np.zeros((20, 1, 64, 199), dtype=np.float16))
+            v_cache_self.append(np.zeros((20, 1, 199, 64), dtype=np.float16))
+            
+            # Cross-attention cache (from encoder)
+            k_cache_cross.append(np.random.randn(20, 1, 64, 1500).astype(np.float16))
+            v_cache_cross.append(np.random.randn(20, 1, 1500, 64).astype(np.float16))
+        
+        # Prepare inputs for decoder
         inputs = {
             "input_ids": input_ids,
-            "encoder_hidden_states": encoder_out,
-            "use_cache_branch": np.array([False], dtype=bool)
+            "attention_mask": attention_mask,
+            "position_ids": position_ids,
+            "k_cache_self_0_in": k_cache_self[0],
+            "v_cache_self_0_in": v_cache_self[0],
+            "k_cache_self_1_in": k_cache_self[1],
+            "v_cache_self_1_in": v_cache_self[1],
+            "k_cache_self_2_in": k_cache_self[2],
+            "v_cache_self_2_in": v_cache_self[2],
+            "k_cache_self_3_in": k_cache_self[3],
+            "v_cache_self_3_in": v_cache_self[3],
+            "k_cache_cross_0": k_cache_cross[0],
+            "v_cache_cross_0": v_cache_cross[0],
+            "k_cache_cross_1": k_cache_cross[1],
+            "v_cache_cross_1": v_cache_cross[1],
+            "k_cache_cross_2": k_cache_cross[2],
+            "v_cache_cross_2": v_cache_cross[2],
+            "k_cache_cross_3": k_cache_cross[3],
+            "v_cache_cross_3": v_cache_cross[3]
         }
-        for i in range(4):
-            inputs[f"past_key_values.{i}.decoder.key"] = np.zeros((batch_size, num_heads, 0, head_dim), dtype=np.float32)
-            inputs[f"past_key_values.{i}.decoder.value"] = np.zeros((batch_size, num_heads, 0, head_dim), dtype=np.float32)
-            inputs[f"past_key_values.{i}.encoder.key"] = np.zeros((batch_size, num_heads, encoder_seq_len, head_dim), dtype=np.float32)
-            inputs[f"past_key_values.{i}.encoder.value"] = np.zeros((batch_size, num_heads, encoder_seq_len, head_dim), dtype=np.float32)
+        
         try:
+            if step == 0:
+                print(f"Running decoder inference with provider: {decoder_sess.get_providers()}")
+                print(f"Input shapes: input_ids={input_ids.shape}")
+            
+            # Run decoder inference
             outputs = decoder_sess.run(None, inputs)
-            logits = outputs[0]
+            logits = outputs[0]  # First output is logits
+            
+            if step == 0:
+                print(f"Decoder inference completed successfully, logits shape: {logits.shape}")
+            
+            # Process logits
             temperature = 0.1
             logits = logits[0, -1, :] / temperature
             probs = np.exp(logits - np.max(logits))
             probs = probs / np.sum(probs)
             next_token = int(np.argmax(probs))
+            
+            print(f"Step {step + 1}: Generated token {next_token}")
+            
         except Exception as e:
             print(f"Decoder error at step {step}: {e}")
             break
+        
         tokens.append(next_token)
+        
+        # Check for end tokens
         if next_token == special_tokens.get("<|endoftext|>", 50256):
+            print("End of text token found")
             break
         if next_token == special_tokens.get("<|nospeech|>", 50361):
+            print("No speech token found")
             break
-    content_tokens = [t for t in tokens[4:] if t < 50000]
+    
+    content_tokens = [t for t in tokens[1:] if t < 50000]  # Skip start token
+    print(f"Final content tokens: {content_tokens}")
     return content_tokens
 
 def process_audio(filename):

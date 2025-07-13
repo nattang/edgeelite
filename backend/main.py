@@ -1,12 +1,8 @@
 from fastapi import FastAPI
-<<<<<<< HEAD
-from backend.ocr import CaptureRequest, process_image
-from backend.asr_macos import process_audio
-=======
 from ocr import CaptureRequest, process_image
-from asr import process_audio
+#from asr import process_audio
 from llm import llm_service
->>>>>>> database
+from asr_final import process_audio
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
@@ -176,7 +172,6 @@ async def asr(request: ASRRequest):
             latest_audio_file = os.path.join(recordings_dir, wav_files[0])
             print(f"🎤 Processing latest audio file: {latest_audio_file}")
             result = process_audio(latest_audio_file)
-<<<<<<< HEAD
             print(result)
             msg = " ".join([r["text"] for r in result]).strip()
             print(f"🎤 Transcription result: {msg}")
@@ -188,28 +183,6 @@ async def asr(request: ASRRequest):
         msg = "Recordings directory not found"
     
     return {"message": msg}
-=======
-            
-            # Store using correct function (audio expects list format)
-            audio_data = [{
-                "timestamp": time.time(),
-                "text": result,
-                "audio_file": latest_audio_file
-            }]
-            store_raw_audio_event(
-                session_id=request.session_id,
-                source="audio",
-                audio_data=audio_data
-            )
-            
-            return {"message": result}
-        else:
-            print("🎤 No audio files found in recordings directory")
-            return {"message": "No audio file found"}
-    else:
-        print("🎤 Recordings directory not found")
-        return {"message": "Recordings directory not found"}
->>>>>>> database
 
 @app.post("/capture") #FOR OCR CAPTURE
 async def capture(data: CaptureRequest):
