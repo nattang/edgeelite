@@ -141,6 +141,18 @@ export default function HomePage() {
       </Head>
 
       <div className="p-6 max-w-md mx-auto">
+        {/* Navigation */}
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">EdgeElite AI Assistant</h1>
+          <div className="flex gap-4">
+            <Link href="/next" className="text-blue-600 hover:text-blue-800 text-sm">
+              Next Page
+            </Link>
+            <Link href="/journal" className="text-blue-600 hover:text-blue-800 text-sm font-medium">
+              📔 Journal
+            </Link>
+          </div>
+        </div>
         {/* Session Management */}
         <div className="mb-4 p-3 bg-gray-100 rounded">
           <div className="flex items-center justify-between mb-2">

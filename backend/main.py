@@ -1,7 +1,7 @@
 from fastapi import FastAPI
-from backend.ocr import CaptureRequest, process_image
-from backend.asr import process_audio
-from backend.llm import llm_service
+from ocr import CaptureRequest, process_image
+from asr import process_audio
+from llm import llm_service
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
@@ -31,6 +31,24 @@ class ContextRequest(BaseModel):
     class Config:
         allow_population_by_field_name = True
 
+class ASRRequest(BaseModel):
+    session_id: str = Field(alias="sessionId")
+    
+    class Config:
+        allow_population_by_field_name = True
+
+class SessionEndRequest(BaseModel):
+    session_id: str = Field(alias="sessionId")
+    
+    class Config:
+        allow_population_by_field_name = True
+
+class JournalRequest(BaseModel):
+    session_id: str = Field(alias="sessionId")
+    
+    class Config:
+        allow_population_by_field_name = True
+
 app = FastAPI()
 
 origins = [
@@ -46,12 +64,101 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# This is run when the user ends the session from frontend
+# Journal processing cache
+journal_cache = {}
+
+async def run_journal_pipeline(session_id: str):
+    """
+    Process a session and generate journal entry with RAG.
+    
+    Steps:
+    1. Process session (clean, chunk, embed)
+    2. Get current session text
+    3. Search for similar past sessions
+    4. Use most relevant past experience as context
+    5. Generate LLM response with personalized guidance
+    6. Cache result for frontend
+    """
+    try:
+        print(f"🔄 Starting journal pipeline for session: {session_id}")
+        
+        # 1. Process session using storage system -> This triggers the backend processing process
+        from storage.interface import process_session
+        node_ids = process_session(session_id)
+        print(f"📊 Session processed: {len(node_ids)} nodes created")
+        
+        # 2. Get current session text for RAG
+        from storage.db import StorageDB
+        db = StorageDB()
+        raw_events = db.get_raw_events_by_session(session_id)
+        full_doc = "\n".join(event["text"] for event in raw_events 
+                            if event["source"] in ("asr", "ocr"))
+        
+        # 3. Search for similar past sessions (exclude current session)
+        from storage.interface import search_similar
+        
+        ##TODO: Doing RAG on the entire session document. Check if this gives good results.
+        similar_results = search_similar(full_doc, k=3)
+        
+        # 4. Use most relevant similar experience as context
+        remedy_context = ""
+        if similar_results:
+            # Take the most semantically similar result as context
+            top_result = similar_results[0]  # Most similar by FAISS ranking
+            remedy_context = top_result[1]   # Full content - this is all we need
+        
+        # 5. Generate journal entry with LLM
+        if remedy_context:
+            prompt = f"""
+            Current session:
+            ```{full_doc}```
+            
+            This is the most relevant past experience that could be helpful for this results:
+            ```{remedy_context}```
+            
+            Task: Analyze the current session and provide:
+            1) A brief summary of the current situation and emotions (1-2 sentences)
+            2) Actionable guidance that draws insight from the related past experience
+            
+            If the past experience contains a successful approach or solution, reference it specifically.
+            Keep response under 120 words and make it personal and actionable.
+            """
+        else:
+            prompt = f"""
+            Current session:
+            ```{full_doc}```
+            
+            Task: Analyze this session and provide:
+            1) A brief summary of the current situation and emotions (1-2 sentences)  
+            2) Thoughtful, actionable guidance based on the content
+            
+            Keep response under 120 words and make it personal and actionable.
+            """
+        
+        response = llm_service.generate_response(prompt, [])
+        
+        # 6. Cache for frontend polling
+        journal_cache[session_id] = {
+            "summary_action": response,
+            "related_memory": remedy_context[:200] if remedy_context else None
+        }
+        
+        print(f"✅ Journal pipeline completed for session: {session_id}")
+        
+    except Exception as e:
+        print(f"❌ Journal pipeline error for session {session_id}: {e}")
+        journal_cache[session_id] = {"error": str(e)}
+
 @app.get("/")
 def read_root():
     return {"message": "Hello from FastAPI!"}
 
-@app.post("/asr")
-async def asr():
+@app.post("/asr") #FOR ASR CAPTURE
+async def asr(request: ASRRequest):
+    import time
+    from storage.interface import store_raw_audio_event
+    
     print("🎤 Received ASR trigger request")
     
     # Look for the most recent audio file in the recordings folder
@@ -66,19 +173,44 @@ async def asr():
             latest_audio_file = os.path.join(recordings_dir, wav_files[0])
             print(f"🎤 Processing latest audio file: {latest_audio_file}")
             result = process_audio(latest_audio_file)
+            
+            # Store using correct function (audio expects list format)
+            audio_data = [{
+                "timestamp": time.time(),
+                "text": result,
+                "audio_file": latest_audio_file
+            }]
+            store_raw_audio_event(
+                session_id=request.session_id,
+                source="audio",
+                audio_data=audio_data
+            )
+            
+            return {"message": result}
         else:
             print("🎤 No audio files found in recordings directory")
-            result = "No audio file found"
+            return {"message": "No audio file found"}
     else:
         print("🎤 Recordings directory not found")
-        result = "Recordings directory not found"
-    
-    return {"message": result}
+        return {"message": "Recordings directory not found"}
 
-@app.post("/capture")
+@app.post("/capture") #FOR OCR CAPTURE
 async def capture(data: CaptureRequest):
+    import time
+    from storage.interface import store_raw_ocr_event
+    
     print(f"Received capture request for: {data.filename}")
-    process_image(data.filename)
+    result = process_image(data.filename)
+    
+    # Store in database using correct function
+    store_raw_ocr_event(
+        session_id=data.session_id,
+        source="ocr",
+        ts=time.time(),
+        text=result,
+        metadata={"image_file": data.filename}
+    )
+    
     return {"message": f"Processed {data.filename}"}
 
 @app.post("/api/query")
@@ -146,3 +278,30 @@ async def get_context(request: ContextRequest):
     except Exception as e:
         print(f"Context retrieval error: {e}")
         return {"error": str(e), "session_id": request.session_id}
+
+@app.post("/api/session/end")
+async def end_session(request: SessionEndRequest):
+    """
+    End a session and trigger journal processing.
+    """
+    session_id = request.session_id
+    print(f"🔚 Session ending: {session_id}")
+    
+    # Trigger journal pipeline asynchronously
+    import asyncio
+    asyncio.create_task(run_journal_pipeline(session_id))
+    
+    return {"status": "processing", "session_id": session_id}
+
+@app.post("/api/journal")
+async def get_journal(request: JournalRequest):
+    """
+    Poll for journal processing status and results.
+    """
+    session_id = request.session_id
+    entry = journal_cache.get(session_id)
+    
+    if entry:
+        return {"status": "done", "session_id": session_id, **entry}
+    else:
+        return {"status": "processing", "session_id": session_id}

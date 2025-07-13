@@ -165,6 +165,64 @@ This is a mock response - real LLM integration coming soon!
         message: 'Session stats retrieved (mock mode)'
       }
     }
+  },
+
+  // End session and trigger journal processing
+  endSession: async (sessionId) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/session/end`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId })
+      })
+      
+      if (!response.ok) {
+        throw new Error(`Session end failed: ${response.status}`)
+      }
+      
+      return await response.json()
+    } catch (error) {
+      console.error('Session end failed:', error)
+      throw error
+    }
+  },
+
+  // Poll for journal processing results
+  pollJournal: async (sessionId) => {
+    let status = "processing"
+    let attempts = 0
+    const maxAttempts = 40 // 60 seconds max
+    
+    while (status === "processing" && attempts < maxAttempts) {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/journal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId })
+        })
+        
+        if (!response.ok) {
+          throw new Error(`Journal poll failed: ${response.status}`)
+        }
+        
+        const data = await response.json()
+        status = data.status
+        
+        if (status === "done") {
+          return data
+        }
+        
+        // Wait 1.5 seconds before next poll
+        await new Promise(resolve => setTimeout(resolve, 1500))
+        attempts++
+        
+      } catch (error) {
+        console.error('Journal polling error:', error)
+        throw error
+      }
+    }
+    
+    throw new Error('Journal processing timeout')
   }
 }
 

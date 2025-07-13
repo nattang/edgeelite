@@ -161,13 +161,14 @@ function audioBufferToWav(buffer) {
   return arrayBuffer
 }
 
+//ASR CAPTURE TRIGGER TO BACKEND
 export async function sendListenRequest(filename, sessionId = null) {
   const res = await fetch('http://localhost:8000/asr', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ filename }),
+    body: JSON.stringify({ sessionId }),
   })
 
   if (!res.ok) {
