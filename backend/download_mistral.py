@@ -30,15 +30,19 @@ def download_mistral_instruct():
         from transformers import AutoTokenizer, AutoModelForCausalLM
         
         print("📥 Downloading Mistral Instruct model...")
-        print("Model: mistralai/Mistral-7B-Instruct-v0.2")
+        print("Model: mistralai/Mistral-7B-Instruct-v0.3")
         print("Size: ~14GB (will be quantized for edge devices)")
         print("Time: ~10-30 minutes depending on internet speed")
         print()
         
+        # Hugging Face token for authentication
+        hf_token = "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"
+        
         # Download tokenizer
         print("1. Downloading tokenizer...")
         tokenizer = AutoTokenizer.from_pretrained(
-            "mistralai/Mistral-7B-Instruct-v0.2",
+            "mistralai/Mistral-7B-Instruct-v0.3",
+            token=hf_token,
             trust_remote_code=True,
             cache_dir=models_dir
         )
@@ -48,7 +52,8 @@ def download_mistral_instruct():
         # Download model (quantized for edge devices)
         print("2. Downloading model (quantized for edge devices)...")
         model = AutoModelForCausalLM.from_pretrained(
-            "mistralai/Mistral-7B-Instruct-v0.2",
+            "mistralai/Mistral-7B-Instruct-v0.3",
+            token=hf_token,
             torch_dtype="auto",
             device_map="auto",
             trust_remote_code=True,
