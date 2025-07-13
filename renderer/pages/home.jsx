@@ -35,6 +35,14 @@ export default function HomePage() {
   const [isRecallProcessing, setIsRecallProcessing] = React.useState(false)
   const [assistantResponse, setAssistantResponse] = React.useState(null)
 
+  // Tutor tab specific state
+  const [tutorInput, setTutorInput] = React.useState('')
+  const [tutorExplanation, setTutorExplanation] = React.useState('')
+  const [tutorQuiz, setTutorQuiz] = React.useState([])
+  const [isTutorProcessing, setIsTutorProcessing] = React.useState(false)
+  const [tutorMessage, setTutorMessage] = React.useState('')
+
+
   React.useEffect(() => {
     window.ipc.on('message', (msg) => {
       setMessage(msg)
@@ -185,7 +193,58 @@ export default function HomePage() {
       setIsSummarizing(false)
     }
   }
+  // Tutor tab functions
+  const handleExplain = async () => {
+  setIsTutorProcessing(true)
+  setTutorMessage('Generating explanation...')
+  try {
+    const response = await api.tutorExplain(tutorInput)
+    setTutorExplanation(response.explanation)
+    setTutorMessage('Explanation generated.')
+  } catch (error) {
+    console.error('Explain error:', error)
+    setTutorMessage('Failed to generate explanation.')
+  } finally {
+    setIsTutorProcessing(false)
+  }
+}
 
+const handleQuiz = async () => {
+  setIsTutorProcessing(true)
+  setTutorMessage('Generating quiz...')
+  try {
+    const response = await api.tutorQuiz(tutorInput)
+    setTutorQuiz(response.questions || [])
+    setTutorMessage('Quiz generated.')
+  } catch (error) {
+    console.error('Quiz error:', error)
+    setTutorMessage('Failed to generate quiz.')
+  } finally {
+    setIsTutorProcessing(false)
+  }
+}
+
+const handleTutorCapture = async () => {
+  if (isCapturing) return
+  setIsCapturing(true)
+  setTutorMessage('Capturing screenshot and running OCR...')
+
+  try {
+    const result = await window.electronAPI.takeScreenshot()
+    if (result.success) {
+      const ocrResponse = await sendCaptureRequest(result.filePath, 'tutor') // Adjust backend for 'tutor' mode
+      setTutorInput(ocrResponse.text) // Assuming response includes .text
+      setTutorMessage('OCR complete. You can now generate explanation or quiz.')
+    } else {
+      setTutorMessage(`Screenshot failed: ${result.error}`)
+    }
+  } catch (error) {
+    console.error('Tutor capture error:', error)
+    setTutorMessage(`Capture or OCR error: ${error.message}`)
+  } finally {
+    setIsCapturing(false)
+  }
+}
 
 
   // Recall tab session functions
@@ -477,6 +536,88 @@ export default function HomePage() {
     </div>
   )
 
+  const renderTutorTab = () => (
+  <div className="space-y-6">
+    <div className="bg-white rounded-lg shadow p-6">
+      <h2 className="text-xl font-semibold mb-4">📚 Tutor</h2>
+      <p className="text-gray-600 mb-6">
+        Paste a textbook excerpt to get a simple explanation or quiz questions.
+      </p>
+
+      {/* Input Text */}
+      <div className="mb-4">
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Textbook Excerpt:
+        </label>
+        {/* Capture Button */}
+        <div className="mb-4">
+          <button
+            onClick={handleTutorCapture}
+            disabled={isCapturing}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400"
+          >
+            {isCapturing ? 'Capturing...' : '📸 Capture Textbook Screenshot'}
+          </button>
+        </div>
+
+        {/* OCR Text Output */}
+        {tutorInput && (
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Extracted Text:</label>
+            <div className="bg-gray-100 rounded p-3 text-sm text-gray-800 whitespace-pre-wrap">
+              {tutorInput}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex gap-3 mb-4">
+        <button
+          onClick={handleExplain}
+          disabled={!tutorInput || isTutorProcessing}
+          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-400"
+        >
+          {isTutorProcessing ? 'Explaining...' : '💡 Explain'}
+        </button>
+
+        <button
+          onClick={handleQuiz}
+          disabled={!tutorInput || isTutorProcessing}
+          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400"
+        >
+          {isTutorProcessing ? 'Generating Quiz...' : '📝 Quiz'}
+        </button>
+      </div>
+
+      {/* Status Message */}
+      <div className="bg-gray-50 rounded p-3 mb-4">
+        <p className="text-sm text-gray-700">{tutorMessage}</p>
+      </div>
+
+      {/* Explanation Output */}
+      {tutorExplanation && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+          <h4 className="font-medium text-green-900 mb-2">💡 Explanation:</h4>
+          <p className="text-green-800 whitespace-pre-wrap">{tutorExplanation}</p>
+        </div>
+      )}
+
+      {/* Quiz Output */}
+      {tutorQuiz && tutorQuiz.length > 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <h4 className="font-medium text-yellow-900 mb-2">📝 Quiz Questions:</h4>
+          <ul className="list-disc pl-5 text-yellow-800 space-y-1">
+            {tutorQuiz.map((q, i) => (
+              <li key={i}>{q}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  </div>
+)
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Head>
@@ -511,11 +652,22 @@ export default function HomePage() {
           >
             🧠 Recall
           </button>
+          <button
+            onClick={() => setActiveTab('tutor')}
+            className={`px-6 py-3 font-medium text-sm border-b-2 ${
+              activeTab === 'tutor'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            📚 Tutor
+          </button>
         </div>
 
         {/* Tab Content */}
         {activeTab === 'journal' && renderJournalTab()}
         {activeTab === 'recall' && renderRecallTab()}
+        {activeTab === 'tutor' && renderTutorTab()}
 
         {/* Related Memory Modal */}
         {showRelatedModal && selectedRelatedMemory && (
