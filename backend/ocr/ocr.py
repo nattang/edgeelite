@@ -107,7 +107,7 @@ def run_easyocr(image_path: str):
             recognizer_outputs = recognizer_session.run(None, {"image": region_input})
             
             # TODO: look into actual char list -- could be wrong right now
-            text = ocr.recognizer_postprocess(recognizer_outputs, char_list)
+            text = ocr.recognizer_postprocess(recognizer_outputs)
             recognized_texts.append(text)
 
         full_text = "\n".join(recognized_texts)
