@@ -7,9 +7,13 @@ python-multipart>=0.0.6
 # OCR and Image Processing
 onnxruntime>=1.16.0
 Pillow>=10.0.0
+opencv-python>=4.8.0
+pytesseract>=0.3.10
 
 # Audio Processing
 pyaudio>=0.2.11
+librosa>=0.10.0
+soundfile>=0.12.0
 
 # Edge AI Models (No Qualcomm AIHub Required)
 transformers>=4.35.0
@@ -19,5 +23,17 @@ accelerate>=0.24.0
 bitsandbytes>=0.41.0  # For quantization
 sentencepiece>=0.1.99  # For Mistral tokenizer
 
-# Development
-python-dotenv>=1.0.0 
+# QNN and ONNX Runtime with QNN Support
+onnxruntime-qnn>=1.16.0  # QNN execution provider
+qnn>=1.16.0  # Qualcomm Neural Network SDK
+
+# Hugging Face Hub
+huggingface-hub>=0.19.0
+
+# Additional AI/ML Libraries
+numpy>=1.24.0
+scipy>=1.11.0
+
+# Development and Utilities
+python-dotenv>=1.0.0
+requests>=2.31.0 

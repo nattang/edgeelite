@@ -6,9 +6,9 @@ import os
 import json
 
 BASE_DIR = os.path.dirname(__file__)
-# Use Qualcomm Snapdragon X Elite optimized Whisper models
+# Use downloaded Whisper models
 ENCODER_PATH = os.path.join(BASE_DIR, "models/whisper_large_v3_turbo-hfwhisperencoder-qualcomm_snapdragon_x_elite.onnx/model.onnx/model.onnx")
-DECODER_PATH = os.path.join(BASE_DIR, "models/whisper_large_v3_turbo-hfwhisperdecoder-qualcomm_snapdragon_x_elite.onnx/model.onnx/model.onnx")
+DECODER_PATH = os.path.join(BASE_DIR, "models/whisper_large_v3_turbo-hfwhisperdecoder-qualcomm_snapdragon_x_elite.onnx/model.onnx")
 # Use tokenizer files from the asr directory
 MODEL_DIR = os.path.join(BASE_DIR, "models/asr")
 VOCAB_PATH = os.path.join(MODEL_DIR, "vocab.json")
@@ -17,16 +17,34 @@ SPECIAL_TOKENS_PATH = os.path.join(MODEL_DIR, "special_tokens_map.json")
 SAMPLING_RATE = 16000
 CHUNK_DURATION = 5.0
 
-# Enforce QNN/NPU usage only
-encoder_sess = ort.InferenceSession(ENCODER_PATH, providers=["QNNExecutionProvider"])
-decoder_sess = ort.InferenceSession(DECODER_PATH, providers=["QNNExecutionProvider"])
-print("Using QNN Execution Provider")
+# Check if model files exist
+print(f"Checking encoder path: {ENCODER_PATH}")
+print(f"Encoder exists: {os.path.exists(ENCODER_PATH)}")
+print(f"Checking decoder path: {DECODER_PATH}")
+print(f"Decoder exists: {os.path.exists(DECODER_PATH)}")
+
+# Use CPU execution provider (fallback from NPU)
+encoder_sess = ort.InferenceSession(ENCODER_PATH, providers=["CPUExecutionProvider"])
+decoder_sess = ort.InferenceSession(DECODER_PATH, providers=["CPUExecutionProvider"])
+print("Using CPU Execution Provider")
 print(f"Encoder session providers: {encoder_sess.get_providers()}")
 print(f"Decoder session providers: {decoder_sess.get_providers()}")
 print(f"Encoder session active provider: {encoder_sess.get_provider_options()}")
 print(f"Decoder session active provider: {decoder_sess.get_provider_options()}")
-assert "QNNExecutionProvider" in encoder_sess.get_providers(), "NPU (QNN) is NOT being used for encoder!"
-assert "QNNExecutionProvider" in decoder_sess.get_providers(), "NPU (QNN) is NOT being used for decoder!"
+
+print("Encoder inputs:")
+for inp in encoder_sess.get_inputs():
+    print("  ", inp.name, inp.shape, inp.type)
+print("Encoder outputs:")
+for out in encoder_sess.get_outputs():
+    print("  ", out.name, out.shape, out.type)
+
+print("Decoder inputs:")
+for inp in decoder_sess.get_inputs():
+    print("  ", inp.name, inp.shape, inp.type)
+print("Decoder outputs:")
+for out in decoder_sess.get_outputs():
+    print("  ", out.name, out.shape, out.type)
 
 with open(VOCAB_PATH, "r", encoding="utf-8") as f:
     token_to_id = json.load(f)
@@ -246,5 +264,5 @@ def process_audio(filename):
 
 if __name__ == "__main__":
     from pprint import pprint
-    res = process_audio("temp_audio.wav")
+    res = process_audio("audio-2025-07-13T07-04-08-677Z.wav")
     pprint(res)

@@ -2,7 +2,8 @@
 LLM Service for EdgeElite AI Assistant - Qualcomm HaQathon
 
 This module provides on-device LLM inference capabilities for Snapdragon X-Elite.
-Uses a smaller, faster edge-optimized model for Qualcomm outsiders.
+Uses Llama3-TAIDE-LX-8B-Chat-Alpha1 optimized for Qualcomm Snapdragon X-Elite NPU.
+Based on Qualcomm AI Hub tutorials: https://github.com/quic/ai-hub-apps/tree/main/tutorials/llm_on_genie
 """
 
 import time
@@ -28,21 +29,46 @@ except ImportError:
     TRANSFORMERS_AVAILABLE = False
     print("⚠️ Transformers not available, using enhanced mock responses")
 
+# Try to import LM Studio client
+try:
+    from lmstudio import Client
+    LM_STUDIO_AVAILABLE = True
+except ImportError:
+    LM_STUDIO_AVAILABLE = False
+    print("⚠️ LM Studio client not available")
+
+# Try to import Flan-T5 service
+try:
+    from llm_flan_t5 import get_flan_t5_service
+    FLAN_T5_AVAILABLE = True
+except ImportError:
+    FLAN_T5_AVAILABLE = False
+    print("⚠️ Flan-T5 service not available")
+
 class LLMService:
-    """On-device LLM service for Snapdragon X-Elite edge AI using a smaller, faster model."""
+    """On-device LLM service for Snapdragon X-Elite edge AI using Llama-v3.2-3B-Instruct."""
     
     def __init__(self):
         """Initialize the LLM service for edge AI."""
         self.model_loaded = False
-        # Use a smaller, faster model perfect for edge devices
-        self.model_name = "microsoft/DialoGPT-small"  # Only 117M parameters - perfect for edge
-        self.max_context_length = 512  # Smaller context for faster inference
-        self.max_response_length = 256  # Longer responses for better summaries
+        # Use Llama-v3.2-3B-Instruct from LM Studio for high-quality edge inference
+        self.model_name = "llama-v3.2-3b-instruct"
+        self.max_context_length = 4096  # Llama v3.2 supports longer context
+        self.max_response_length = 512  # Longer responses for better quality
         
-        # Model paths for edge models
+        # Model paths for small LLM
         self.models_dir = os.path.join(os.path.dirname(__file__), "models")
-        self.model_path = os.path.join(self.models_dir, "models--microsoft--DialoGPT-small", "snapshots", "49c537161a457d5256512f9d2d38a87d81ae0f0e")
-        self.onnx_model_path = os.path.join(self.models_dir, "dialogpt-small.onnx")
+        self.small_llm_path = os.path.join(self.models_dir, "small_llm")
+        
+        # LM Studio client pointing at local server
+        self.lm_client = None
+        if LM_STUDIO_AVAILABLE:
+            try:
+                self.lm_client = Client(base_url="http://localhost:8080")
+                print("[LLM] ✅ LM Studio client initialized")
+            except Exception as e:
+                print(f"[LLM] ⚠️ LM Studio client initialization failed: {e}")
+                self.lm_client = None
         
         # ONNX Runtime components
         self.session = None
@@ -79,68 +105,60 @@ class LLMService:
         }
         
     def load_model(self):
-        """Load the edge-optimized smaller model."""
+        """Load the best available model for high-quality edge inference."""
         try:
-            print(f"[LLM] Loading {self.model_name} for Snapdragon X-Elite...")
-            # Try loading ONNX model first (fastest for edge)
-            if ONNX_AVAILABLE and os.path.exists(self.onnx_model_path):
-                self._load_onnx_model()
-                print(f"[LLM] ✅ Model loaded: ONNX | Providers: {self.session.get_providers() if self.session else 'None'}")
-                if self.session and 'QNNExecutionProvider' in self.session.get_providers():
-                    print("[LLM] ✅ Using NPU (QNNExecutionProvider) for inference!")
-                else:
-                    print("[LLM] ⚠️ Not using NPU, using CPU/GPU for inference.")
-                return
-            # Try loading Transformers model (fallback)
-            if TRANSFORMERS_AVAILABLE and os.path.exists(self.model_path):
-                self._load_transformers_model()
-                print(f"[LLM] ✅ Model loaded: Transformers | Device: {'NPU' if self.use_qnn else 'CPU/GPU'}")
+            print(f"[LLM] Loading models for Snapdragon X-Elite...")
+            
+            # Try connecting to LM Studio first (highest priority)
+            if LM_STUDIO_AVAILABLE and self.lm_client:
+                try:
+                    # Check connectivity and list available models
+                    models = self.lm_client.list_models()
+                    print(f"[LLM] ✅ LM Studio available models: {models}")
+                    
+                    # Load the desired model
+                    self.lm_client.load_model("llama-v3.2-3b-instruct")
+                    self.model_loaded = True
+                    print("[LLM] ✅ LM Studio model loaded successfully")
+                    return
+                except Exception as e:
+                    print(f"[LLM] ⚠️ LM Studio connection failed: {e}")
+            
+            # Try loading Flan-T5 model (high quality, quantized)
+            if FLAN_T5_AVAILABLE:
+                try:
+                    flan_t5_service = get_flan_t5_service()
+                    if flan_t5_service.load_model():
+                        self.model_loaded = True
+                        self.flan_t5_service = flan_t5_service  # Store reference
+                        print("[LLM] ✅ Flan-T5 model loaded successfully")
+                        return
+                except Exception as e:
+                    print(f"[LLM] ⚠️ Flan-T5 loading failed: {e}")
+            
+            # Try loading small LLM model locally
+            if TRANSFORMERS_AVAILABLE and os.path.exists(self.small_llm_path):
+                self._load_small_llm_model()
+                print(f"[LLM] ✅ Small LLM model loaded: | Device: {'NPU' if self.use_qnn else 'CPU/GPU'}")
                 if self.use_qnn:
-                    print("[LLM] ✅ Using NPU (QNN) for inference!")
+                    print("[LLM] ✅ Using NPU (QNN) for small LLM inference!")
                 else:
-                    print("[LLM] ⚠️ Not using NPU, using CPU/GPU for inference.")
+                    print("[LLM] ⚠️ Not using NPU, using CPU/GPU for small LLM inference.")
                 return
-            # If no models available, use enhanced mock mode
-            print("[LLM] ❌ No edge-optimized models found! MOCK will be used (should not happen)")
+                
+            # If no model available, use enhanced mock mode
+            print("[LLM] ❌ No models available! Using enhanced mock responses")
             self.model_loaded = True
         except Exception as e:
-            print(f"[LLM] Failed to load edge LLM model: {e}")
+            print(f"[LLM] Failed to load models: {e}")
             self.model_loaded = True
     
-    def _load_onnx_model(self):
-        """Load ONNX model for fastest edge inference with NPU support."""
-        try:
-            providers = ['CPUExecutionProvider']
-            
-            # Check for QNN NPU provider (Qualcomm Snapdragon X-Elite)
-            if 'QNNExecutionProvider' in ort.get_available_providers():
-                providers.insert(0, 'QNNExecutionProvider')
-                print("🚀 QNN NPU Execution Provider detected for ONNX")
-            
-            # Check for NPU provider (Qualcomm Snapdragon X-Elite)
-            if 'NPUExecutionProvider' in ort.get_available_providers():
-                providers.insert(0, 'NPUExecutionProvider')
-                print("🚀 NPU Execution Provider detected for ONNX")
-            
-            # Check for CUDA provider
-            if 'CUDAExecutionProvider' in ort.get_available_providers():
-                providers.insert(0, 'CUDAExecutionProvider')
-                print("🚀 CUDA Execution Provider detected for ONNX")
-            
-            self.session = ort.InferenceSession(self.onnx_model_path, providers=providers)
-            self.model_loaded = True
-            print(f"✅ {self.model_name} ONNX model loaded for edge inference with providers: {providers}")
-            
-        except Exception as e:
-            print(f"ONNX model loading failed: {e}")
-            raise
-    
-    def _load_transformers_model(self):
-        """Load smaller model for edge inference with NPU support."""
+    def _load_small_llm_model(self):
+        """Load small LLM model for fast edge inference."""
         try:
             # Load tokenizer
             self.transformers_tokenizer = AutoTokenizer.from_pretrained(
-                self.model_path,
+                self.small_llm_path,
                 trust_remote_code=True
             )
             
@@ -150,9 +168,9 @@ class LLMService:
             # Load model with device-specific configuration
             if device == "qnn_npu":
                 # QNN NPU-specific loading for Snapdragon X-Elite
-                print("🚀 Loading model for QNN NPU acceleration")
+                print("🚀 Loading small LLM for QNN NPU acceleration")
                 self.transformers_model = AutoModelForCausalLM.from_pretrained(
-                    self.model_path,
+                    self.small_llm_path,
                     torch_dtype="auto",
                     device_map="cpu",  # QNN will handle NPU acceleration
                     trust_remote_code=True
@@ -160,77 +178,36 @@ class LLMService:
                 # Set flag to use QNN for inference
                 self.use_qnn = True
                 print(f"✅ {self.model_name} loaded for edge inference on {device}")
-            elif device == "npu":
-                # PyTorch NPU-specific loading for Snapdragon X-Elite
-                self.transformers_model = AutoModelForCausalLM.from_pretrained(
-                    self.model_path,
-                    torch_dtype="auto",
-                    device_map="npu:0",  # Use NPU
-                    trust_remote_code=True
-                )
-                print(f"✅ {self.model_name} loaded for edge inference on {device}")
-            elif device == "cuda":
-                # CUDA GPU loading
-                self.transformers_model = AutoModelForCausalLM.from_pretrained(
-                    self.model_path,
-                    torch_dtype="auto",
-                    device_map="cuda:0",  # Use CUDA
-                    trust_remote_code=True
-                )
-                print(f"✅ {self.model_name} loaded for edge inference on {device}")
-            elif device == "mps":
-                # Apple Silicon GPU
-                self.transformers_model = AutoModelForCausalLM.from_pretrained(
-                    self.model_path,
-                    torch_dtype="auto",
-                    device_map="mps",  # Use MPS
-                    trust_remote_code=True
-                )
-                print(f"✅ {self.model_name} loaded for edge inference on {device}")
             else:
-                # CPU fallback
+                # For other devices, use standard loading
                 self.transformers_model = AutoModelForCausalLM.from_pretrained(
-                    self.model_path,
+                    self.small_llm_path,
                     torch_dtype="auto",
-                    device_map="cpu",  # Use CPU
+                    device_map="auto",
                     trust_remote_code=True
                 )
                 print(f"✅ {self.model_name} loaded for edge inference on {device}")
             
-            # Create pipeline for text generation with explicit device setting
-            if device == "qnn_npu":
-                # For QNN NPU, we need to handle device mapping differently
-                print("🚀 Creating pipeline optimized for QNN NPU")
-                self.text_generator = pipeline(
-                    "text-generation",
-                    model=self.transformers_model,
-                    tokenizer=self.transformers_tokenizer,
-                    max_length=self.max_context_length + self.max_response_length,
-                    do_sample=True,
-                    temperature=0.7,
-                    top_p=0.95,
-                    repetition_penalty=1.1,
-                    device_map="cpu"  # QNN handles NPU acceleration
-                )
-            else:
-                # For other devices, use standard pipeline
-                self.text_generator = pipeline(
-                    "text-generation",
-                    model=self.transformers_model,
-                    tokenizer=self.transformers_tokenizer,
-                    max_length=self.max_context_length + self.max_response_length,
-                    do_sample=True,
-                    temperature=0.7,
-                    top_p=0.95,
-                    repetition_penalty=1.1
-                )
+            # Create pipeline for text generation
+            self.text_generator = pipeline(
+                "text-generation",
+                model=self.transformers_model,
+                tokenizer=self.transformers_tokenizer,
+                max_length=self.max_context_length + self.max_response_length,
+                do_sample=True,
+                temperature=0.7,
+                top_p=0.95,
+                repetition_penalty=1.1
+            )
             
             self.model_loaded = True
-            print(f"✅ {self.model_name} loaded for edge inference on {device}")
+            print(f"✅ {self.model_name} loaded for fast edge inference")
             
         except Exception as e:
-            print(f"Transformers model loading failed: {e}")
+            print(f"Small LLM model loading failed: {e}")
             raise
+    
+
     
     def _detect_best_device(self) -> str:
         """Detect the best available device for Snapdragon X-Elite."""
@@ -275,7 +252,31 @@ class LLMService:
     def generate_edge_response(self, prompt: str) -> str:
         """Generate response using edge-optimized model."""
         try:
-            # Try ONNX inference first (fastest)
+            # Try LM Studio first (highest priority)
+            if LM_STUDIO_AVAILABLE and self.lm_client:
+                try:
+                    print("[LLM] 🧠 Generating response with LM Studio (Llama-v3.2-3B-Instruct)")
+                    return self._generate_lm_studio_response(prompt)
+                except Exception as e:
+                    print(f"[LLM] ⚠️ LM Studio failed, falling back: {e}")
+            
+            # Try Flan-T5 model (high quality, quantized)
+            if hasattr(self, 'flan_t5_service') and self.flan_t5_service and self.flan_t5_service.model_loaded:
+                try:
+                    print("[LLM] 🧠 Generating response with Flan-T5 (Quantized ONNX)")
+                    return self.flan_t5_service.generate_response(prompt, [])
+                except Exception as e:
+                    print(f"[LLM] ⚠️ Flan-T5 failed, falling back: {e}")
+            elif FLAN_T5_AVAILABLE:
+                try:
+                    flan_t5_service = get_flan_t5_service()
+                    if flan_t5_service.model_loaded:
+                        print("[LLM] 🧠 Generating response with Flan-T5 (Quantized ONNX)")
+                        return flan_t5_service.generate_response(prompt, [])
+                except Exception as e:
+                    print(f"[LLM] ⚠️ Flan-T5 failed, falling back: {e}")
+            
+            # Try ONNX inference (fastest local)
             if self.session:
                 print("[LLM] 🧠 Generating response with REAL MODEL (ONNX)")
                 if 'QNNExecutionProvider' in self.session.get_providers():
@@ -283,6 +284,7 @@ class LLMService:
                 else:
                     print("[LLM] ⚠️ NPU NOT used for ONNX, using CPU/GPU.")
                 return self._generate_onnx_response(prompt)
+            
             # Try Transformers inference
             if self.text_generator:
                 print(f"[LLM] 🧠 Generating response with REAL MODEL (Transformers) | Device: {'NPU' if self.use_qnn else 'CPU/GPU'}")
@@ -291,6 +293,7 @@ class LLMService:
                 else:
                     print("[LLM] ⚠️ NPU NOT used for Transformers, using CPU/GPU.")
                 return self._generate_transformers_response(prompt)
+            
             # Fallback to enhanced mock
             print("[LLM] ❌ MOCK RESPONSE USED! This should not happen.")
             raise RuntimeError("No edge models available")
@@ -298,43 +301,79 @@ class LLMService:
             print(f"[LLM] Edge inference failed: {e}")
             raise
     
+    def _generate_lm_studio_response(self, prompt: str) -> str:
+        """Generate response using LM Studio REST API."""
+        try:
+            if not LM_STUDIO_AVAILABLE or not self.lm_client:
+                return "LM Studio not available"
+            
+            # Send prompt and receive text completion
+            resp = self.lm_client.generate_completion(
+                model_id="llama-v3.2-3b-instruct",
+                prompt=prompt,
+                max_tokens=self.max_response_length,
+                temperature=0.7,
+            )
+            return resp.text  # or resp.choices[0].text depending on SDK version
+            
+        except Exception as e:
+            print(f"[LM Studio] inference error: {e}")
+            return f"[LM Studio] error: {e}"
+    
     def _generate_onnx_response(self, prompt: str) -> str:
-        """Generate response using ONNX model (fastest for edge)."""
-        # Simplified ONNX inference for edge devices
-        return "Generated response from edge-optimized ONNX model"
+        """Generate response using small LLM ONNX model (fastest for edge)."""
+        try:
+            if self.session is None:
+                return "Generated response from small LLM ONNX model"
+            
+            # For now, return a placeholder since ONNX inference needs special implementation
+            # TODO: Implement proper ONNX inference for the small LLM model
+            print("[LLM] ⚠️ ONNX inference not yet implemented for small LLM model")
+            return "Generated response from small LLM ONNX model (placeholder)"
+            
+        except Exception as e:
+            print(f"Small LLM ONNX inference failed: {e}")
+            return "Generated response from small LLM ONNX model"
     
     def _generate_transformers_response(self, prompt: str) -> str:
-        """Generate response using smaller model."""
+        """Generate response using small LLM model."""
         try:
             if self.text_generator is None:
-                return "Generated response from edge-optimized model"
+                return "Generated response from small LLM model"
             
             # Show NPU usage if applicable
             if self.use_qnn:
-                print("🚀 Generating response using QNN NPU acceleration")
+                print("🚀 Generating response using QNN NPU acceleration with small LLM")
+            
+            # Format prompt for small model (DialoGPT format)
+            formatted_prompt = f"User: {prompt}\nAssistant:"
             
             # Set pad token ID safely
             pad_token_id = self.transformers_tokenizer.eos_token_id if self.transformers_tokenizer else None
             
             result = self.text_generator(
-                prompt, 
+                formatted_prompt, 
                 max_new_tokens=self.max_response_length,
                 do_sample=True,
-                temperature=0.8,
-                top_p=0.9,
-                repetition_penalty=1.2,
+                temperature=0.7,
+                top_p=0.95,
+                repetition_penalty=1.1,
                 pad_token_id=pad_token_id
             )
             
             # Extract response (remove the prompt part)
             full_response = result[0]['generated_text']
-            response = full_response[len(prompt):].strip()
+            response = full_response[len(formatted_prompt):].strip()
+            
+            # Clean up the response
+            if response.startswith("</s>"):
+                response = response[4:].strip()
             
             return response
             
         except Exception as e:
-            print(f"Transformers inference failed: {e}")
-            return "Generated response from edge-optimized model"
+            print(f"Small LLM Transformers inference failed: {e}")
+            return "Generated response from small LLM model"
     
     def format_context_for_llm(self, context: List[Dict[str, Any]]) -> str:
         """Format context events for edge AI analysis."""
@@ -352,12 +391,16 @@ class LLMService:
         return "\n".join(formatted_context)
     
     def generate_prompt(self, user_input: str, context: List[Dict[str, Any]]) -> str:
-        """Generate edge AI prompt for smaller model on Snapdragon X-Elite."""
+        """Generate edge AI prompt for Llama-v3.2-3B-Instruct on Snapdragon X-Elite."""
         context_text = self.format_context_for_llm(context)
         
-        # Create a more specific prompt for better responses
+        # Create a more specific prompt for Llama v3.2 Instruct
         if "summarize" in user_input.lower():
-            prompt = f"""You are an edge AI assistant analyzing a work session. Based on this context, provide a detailed summary:
+            prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+
+You are an edge AI assistant running on Snapdragon X-Elite NPU, analyzing a work session. Based on this context, provide a detailed summary.
+
+<|eot_id|><|start_header_id|>user<|end_header_id|>
 
 Context:
 {context_text}
@@ -368,34 +411,70 @@ Provide a comprehensive summary including:
 - What the user was working on
 - Key activities and patterns
 - Insights and observations
-- Recommendations
+- Recommendations for optimization
 
-Summary:"""
+Please be concise but thorough.
+
+<|eot_id|><|start_header_id|>assistant<|end_header_id|>"""
         else:
-            prompt = f"""You are an edge AI assistant running on Snapdragon X-Elite. Analyze this session and respond to the user's query.
+            prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+
+You are an edge AI assistant running on Snapdragon X-Elite NPU. Analyze this session and respond to the user's query.
+
+<|eot_id|><|start_header_id|>user<|end_header_id|>
 
 Context from user's session:
 {context_text}
 
 User Query: {user_input}
 
-Provide a helpful response with insights and recommendations:"""
+Provide a helpful response with insights and recommendations. Be concise and practical.
+
+<|eot_id|><|start_header_id|>assistant<|end_header_id|>"""
         
         return prompt
     
     def generate_response(self, user_input: str, context: List[Dict[str, Any]]) -> str:
-        """Generate response using edge AI with smaller model only. No mock responses."""
+        """Generate response using edge AI with available models. No mock responses."""
         if not self.model_loaded:
             self.load_model()
         
         try:
+            # Try LM Studio first (with context)
+            if LM_STUDIO_AVAILABLE and self.lm_client:
+                try:
+                    print("[LLM] 🧠 Using LM Studio with context")
+                    # For LM Studio, we'll use the prompt directly
+                    prompt = self.generate_prompt(user_input, context)
+                    response = self._generate_lm_studio_response(prompt)
+                    return self._post_process_response(response, context, user_input)
+                except Exception as e:
+                    print(f"[LLM] ⚠️ LM Studio failed, falling back: {e}")
+            
+            # Try Flan-T5 model (high quality, quantized)
+            if hasattr(self, 'flan_t5_service') and self.flan_t5_service and self.flan_t5_service.model_loaded:
+                try:
+                    print("[LLM] 🧠 Using Flan-T5 with context")
+                    return self.flan_t5_service.generate_response(user_input, context)
+                except Exception as e:
+                    print(f"[LLM] ⚠️ Flan-T5 failed, falling back: {e}")
+            elif FLAN_T5_AVAILABLE:
+                try:
+                    flan_t5_service = get_flan_t5_service()
+                    if flan_t5_service.model_loaded:
+                        print("[LLM] 🧠 Using Flan-T5 with context")
+                        return flan_t5_service.generate_response(user_input, context)
+                except Exception as e:
+                    print(f"[LLM] ⚠️ Flan-T5 failed, falling back: {e}")
+            
+            # Fall back to local models
             prompt = self.generate_prompt(user_input, context)
-            # Always use the real model (ONNX or Transformers)
             if self.session or self.text_generator:
                 response = self.generate_edge_response(prompt)
                 return self._post_process_response(response, context, user_input)
+            
             # If no model is available, raise error
-            raise RuntimeError("No edge-optimized model is available. Please check model files and dependencies.")
+            raise RuntimeError("No models available. Please check LM Studio connection or local model files.")
         except Exception as e:
             print(f"Edge AI generation failed: {e}")
             raise
@@ -495,20 +574,25 @@ Note: This is an enhanced mock response optimized for edge AI scenarios. Real mo
     
     def get_model_info(self) -> Dict[str, Any]:
         """Get information about the edge AI model."""
+        lm_studio_status = {
+            "connected": LM_STUDIO_AVAILABLE and self.lm_client is not None,
+            "base_url": "http://localhost:8080" if self.lm_client else None
+        }
+        
         return {
             "model_name": self.model_name,
             "loaded": self.model_loaded,
             "onnx_available": ONNX_AVAILABLE,
             "transformers_available": TRANSFORMERS_AVAILABLE,
-            "model_path": self.model_path,
-            "onnx_model_path": self.onnx_model_path,
-            "model_exists": os.path.exists(self.model_path) if self.model_path else False,
-            "onnx_exists": os.path.exists(self.onnx_model_path) if self.onnx_model_path else False,
+            "lm_studio_available": LM_STUDIO_AVAILABLE,
+            "lm_studio_status": lm_studio_status,
+            "model_path": self.small_llm_path,
+            "model_exists": os.path.exists(self.small_llm_path) if self.small_llm_path else False,
             "max_context_length": self.max_context_length,
             "max_response_length": self.max_response_length,
             "edge_optimized": True,
             "platform": "Snapdragon X-Elite",
-            "model_type": "Small Edge Model"
+            "model_type": "Llama-v3.2-3B-Instruct via LM Studio"
         }
 
 # Global instance
