@@ -41,6 +41,9 @@ export default function HomePage() {
   const [tutorQuiz, setTutorQuiz] = React.useState([])
   const [isTutorProcessing, setIsTutorProcessing] = React.useState(false)
   const [tutorMessage, setTutorMessage] = React.useState('')
+  const [tutorSessionId, setTutorSessionId] = React.useState(null)
+  const [isTutorSessionActive, setIsTutorSessionActive] = React.useState(false)
+
 
 
   React.useEffect(() => {
@@ -198,7 +201,7 @@ export default function HomePage() {
   setIsTutorProcessing(true)
   setTutorMessage('Generating explanation...')
   try {
-    const response = await api.tutorExplain(tutorInput)
+    const response = await api.queryLLM(tutorInput)
     setTutorExplanation(response.explanation)
     setTutorMessage('Explanation generated.')
   } catch (error) {
@@ -213,7 +216,7 @@ const handleQuiz = async () => {
   setIsTutorProcessing(true)
   setTutorMessage('Generating quiz...')
   try {
-    const response = await api.tutorQuiz(tutorInput)
+    const response = await api.queryLLM(tutorInput)
     setTutorQuiz(response.questions || [])
     setTutorMessage('Quiz generated.')
   } catch (error) {
@@ -232,7 +235,7 @@ const handleTutorCapture = async () => {
   try {
     const result = await window.electronAPI.takeScreenshot()
     if (result.success) {
-      const ocrResponse = await sendCaptureRequest(result.filePath, 'tutor') // Adjust backend for 'tutor' mode
+      const ocrResponse = await sendCaptureRequest(result.filePath, 'tutor') 
       setTutorInput(ocrResponse.text) // Assuming response includes .text
       setTutorMessage('OCR complete. You can now generate explanation or quiz.')
     } else {
@@ -245,7 +248,19 @@ const handleTutorCapture = async () => {
     setIsCapturing(false)
   }
 }
+  // Tutor session functions
+  const startTutorSession = () => {
+    const newSessionId = generateSessionId()
+    setTutorSessionId(newSessionId)
+    setIsTutorSessionActive(true)
+    setTutorMessage(`Tutor session started: ${newSessionId}`)
+  }
 
+  const endTutorSession = () => {
+    setIsTutorSessionActive(false)
+    setTutorSessionId(null)
+    setTutorMessage('Tutor session ended')
+  }
 
   // Recall tab session functions
   const startRecallSession = () => {
@@ -537,30 +552,47 @@ const handleTutorCapture = async () => {
   )
 
   const renderTutorTab = () => (
-  <div className="space-y-6">
-    <div className="bg-white rounded-lg shadow p-6">
-      <h2 className="text-xl font-semibold mb-4">📚 Tutor</h2>
-      <p className="text-gray-600 mb-6">
-        Paste a textbook excerpt to get a simple explanation or quiz questions.
-      </p>
+    <div className="space-y-6">
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-xl font-semibold mb-4">📚 Tutor Session</h2>
 
-      {/* Input Text */}
-      <div className="mb-4">
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Textbook Excerpt:
-        </label>
-        {/* Capture Button */}
-        <div className="mb-4">
+        <div className="bg-gray-100 rounded-lg p-4 mb-4">
+          <div className="flex items-center justify-between">
+            <span className="font-medium">Tutor Session Status:</span>
+            <span className={`px-3 py-1 rounded-full text-sm ${
+              isTutorSessionActive ? 'bg-green-200 text-green-800' : 'bg-gray-200'
+            }`}>
+              {isTutorSessionActive ? 'Active' : 'Inactive'}
+            </span>
+          </div>
+          {tutorSessionId && (
+            <div className="text-sm text-gray-600 mt-2">
+              Session ID: {tutorSessionId}
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-3 mb-4">
+          <button
+            onClick={isTutorSessionActive ? endTutorSession : startTutorSession}
+            className={`px-4 py-2 rounded-lg font-medium ${
+              isTutorSessionActive
+                ? 'bg-red-600 text-white hover:bg-red-700'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+            }`}
+          >
+            {isTutorSessionActive ? 'End Session' : 'Start Session'}
+          </button>
+
           <button
             onClick={handleTutorCapture}
-            disabled={isCapturing}
+            disabled={!isTutorSessionActive || isCapturing}
             className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400"
           >
             {isCapturing ? 'Capturing...' : '📸 Capture Textbook Screenshot'}
           </button>
         </div>
 
-        {/* OCR Text Output */}
         {tutorInput && (
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">Extracted Text:</label>
@@ -569,54 +601,49 @@ const handleTutorCapture = async () => {
             </div>
           </div>
         )}
-      </div>
 
-      {/* Action Buttons */}
-      <div className="flex gap-3 mb-4">
-        <button
-          onClick={handleExplain}
-          disabled={!tutorInput || isTutorProcessing}
-          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-400"
-        >
-          {isTutorProcessing ? 'Explaining...' : '💡 Explain'}
-        </button>
+        <div className="flex gap-3 mb-4">
+          <button
+            onClick={handleExplain}
+            disabled={!tutorInput || isTutorProcessing || !isTutorSessionActive}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-400"
+          >
+            {isTutorProcessing ? 'Explaining...' : '💡 Explain'}
+          </button>
 
-        <button
-          onClick={handleQuiz}
-          disabled={!tutorInput || isTutorProcessing}
-          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400"
-        >
-          {isTutorProcessing ? 'Generating Quiz...' : '📝 Quiz'}
-        </button>
-      </div>
-
-      {/* Status Message */}
-      <div className="bg-gray-50 rounded p-3 mb-4">
-        <p className="text-sm text-gray-700">{tutorMessage}</p>
-      </div>
-
-      {/* Explanation Output */}
-      {tutorExplanation && (
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
-          <h4 className="font-medium text-green-900 mb-2">💡 Explanation:</h4>
-          <p className="text-green-800 whitespace-pre-wrap">{tutorExplanation}</p>
+          <button
+            onClick={handleQuiz}
+            disabled={!tutorInput || isTutorProcessing || !isTutorSessionActive}
+            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400"
+          >
+            {isTutorProcessing ? 'Generating Quiz...' : '📝 Quiz'}
+          </button>
         </div>
-      )}
 
-      {/* Quiz Output */}
-      {tutorQuiz && tutorQuiz.length > 0 && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <h4 className="font-medium text-yellow-900 mb-2">📝 Quiz Questions:</h4>
-          <ul className="list-disc pl-5 text-yellow-800 space-y-1">
-            {tutorQuiz.map((q, i) => (
-              <li key={i}>{q}</li>
-            ))}
-          </ul>
+        <div className="bg-gray-50 rounded p-3 mb-4">
+          <p className="text-sm text-gray-700">{tutorMessage}</p>
         </div>
-      )}
+
+        {tutorExplanation && (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+            <h4 className="font-medium text-green-900 mb-2">💡 Explanation:</h4>
+            <p className="text-green-800 whitespace-pre-wrap">{tutorExplanation}</p>
+          </div>
+        )}
+
+        {tutorQuiz && tutorQuiz.length > 0 && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <h4 className="font-medium text-yellow-900 mb-2">📝 Quiz Questions:</h4>
+            <ul className="list-disc pl-5 text-yellow-800 space-y-1">
+              {tutorQuiz.map((q, i) => (
+                <li key={i}>{q}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
     </div>
-  </div>
-)
+  )
 
   return (
     <div className="min-h-screen bg-gray-50">

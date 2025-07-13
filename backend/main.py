@@ -357,6 +357,8 @@ async def asr(request: ASRRequest):
 
 @app.post("/capture")
 async def capture(data: CaptureRequest):
+    from storage.interface import store_raw_ocr_event
+
     print(f"Received capture request for: {data.filename}")
     result = process_image(data.filename)
     
