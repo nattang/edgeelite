@@ -13,12 +13,13 @@ from pathlib import Path
 from PIL import Image
 from easyocr.easyocr import Reader
 
+from transformers import TrOCRProcessor
+
 def run_easyocr(image_path: str):
-    base_dir = Path(__file__).parent    
+    base_dir = Path(__file__).parent.parent    
     detector_model_path = base_dir / "models" / "easyocr-easyocrdetector.onnx"
     recognizer_model_path = base_dir / "models" / "easyocr-easyocrrecognizer.onnx"
-    
-    root_dir = Path.cwd().parent.parent 
+ 
     onnxruntime_dir = Path(ort.__file__).parent
 
     hexagon_driver = onnxruntime_dir / "capi" / "QnnHtp.dll"
@@ -87,7 +88,7 @@ def run_easyocr(image_path: str):
     ocr.write_text_to_file(full_text, "./backend/ocr/scratch_data/recognized_text.txt")
 
 def setup_trocr_sessions():
-    base_dir = Path(__file__).parent
+    base_dir = Path(__file__).parent.parent
     encoder_model_path = base_dir / "models" / "ocr" / "trocr-trocrencoder.onnx"
     decoder_model_path = base_dir / "models" / "ocr" / "trocr-trocrdecoder.onnx"
 
@@ -100,45 +101,69 @@ def setup_trocr_sessions():
     session_options.log_severity_level = 3
 
     qnn_provider_options = {
-        "backend_path": str(hexagon_driver)
+        "backend_path": hexagon_driver
     }
 
     encoder_session = ort.InferenceSession(
-        encoder_model_path.as_posix(),
+        encoder_model_path,
         providers=[("QNNExecutionProvider", qnn_provider_options), "CPUExecutionProvider"],
         sess_options=session_options
     )
 
     decoder_session = ort.InferenceSession(
-        decoder_model_path.as_posix(),
+        decoder_model_path,
         providers=[("QNNExecutionProvider", qnn_provider_options), "CPUExecutionProvider"],
         sess_options=session_options
     )
-
-    # Print encoder session input/output names
-    print("Encoder session input names:")
-    for inp in encoder_session.get_inputs():
-        print(inp.name, inp.shape, inp.type)
-
-    print("Encoder session output names:")
-    for out in encoder_session.get_outputs():
-        print(out.name, out.shape, out.type)
-
-    # Print decoder session input/output names
-    print("Decoder session input names:")
-    for inp in decoder_session.get_inputs():
-        print(inp.name, inp.shape, inp.type)
 
     print("Decoder session output names:")
     for out in decoder_session.get_outputs():
         print(out.name, out.shape, out.type)
 
+    # print("Encoder session providers:")
+    # print(encoder_session.get_providers())
+    # print("Decoder session providers:")
+    # print(decoder_session.get_providers())
     return encoder_session, decoder_session
 
 def run_trocr(image_path: str):
     encoder_session, decoder_session = setup_trocr_sessions()
     trocr = TrocrApp(encoder_session, decoder_session)
+    processed_image = trocr.process_image(image_path)
+    encoder_outputs = encoder_session.run(None, {"pixel_values": processed_image})
+    print("Finished encoder inference")
+    for i, out in enumerate(encoder_outputs):
+        print(f"Encoder output {i} stats: min={out.min()}, max={out.max()}, mean={out.mean()}")
+
+    decoder_start_token = 0
+    eos_token = 2
+    num_layers = 6
+    num_heads = 8
+    kv_dim = 32
+
+    # Initial decoder input
+    decoder_inputs = trocr.encoder_to_decoder_cache(
+        encoder_outputs,
+        decoder_start_token,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        kv_dim=kv_dim
+    )
+
+    output_tokens = [decoder_start_token]
+    cur_index = 0
+
+    # while True:
+    print("running decoder session")
+    # trocr.check_decoder_input_shapes(decoder_inputs, decoder_session)
+    outputs = decoder_session.run(None, decoder_inputs)
+    output_tokens.append(outputs[0])
+    print("output_tokens: ", output_tokens)
+
+    processor = TrOCRProcessor.from_pretrained("microsoft/trocr-small-stage1")
+    # text = processor.decode(output_tokens, skip_special_tokens=True)
+    # print("text: ", text)
 
 def process_image(image_path: str):
-    # run_easyocr(image_path)
-    run_trocr(image_path)
+    run_easyocr(image_path)
+    # run_trocr(image_path)
