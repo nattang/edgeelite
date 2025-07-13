@@ -25,7 +25,6 @@ sentencepiece>=0.1.99  # For Mistral tokenizer
 
 # QNN and ONNX Runtime with QNN Support
 onnxruntime-qnn>=1.16.0  # QNN execution provider
-qnn>=1.16.0  # Qualcomm Neural Network SDK
 
 # Hugging Face Hub
 huggingface-hub>=0.19.0

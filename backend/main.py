@@ -1,12 +1,10 @@
 from fastapi import FastAPI
-from ocr import CaptureRequest, process_image
 from asr import process_audio
-#from asr_simple import process_audio
-#from asr_final import process_audio
-from llm import llm_service
-from backend.ocr.ocr import process_image
-# from backend.asr import process_audio
-# from backend.llm import llm_service
+from llm import LLMService
+from ocr.ocr import process_image
+
+# Create LLM service instance
+llm_service = LLMService()
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
@@ -74,6 +72,22 @@ app.add_middleware(
 @app.get("/")
 def read_root():
     return {"message": "Hello from FastAPI!"}
+
+@app.get("/health")
+def health_check():
+    # Check OCR models
+    import os
+    ocr_models_dir = os.path.join(os.path.dirname(__file__), "models", "ocr")
+    detector_exists = os.path.exists(os.path.join(ocr_models_dir, "easyocr-easyocrdetector.onnx"))
+    recognizer_exists = os.path.exists(os.path.join(ocr_models_dir, "easyocr-easyocrrecognizer.onnx"))
+    
+    return {
+        "status": "healthy",
+        "backend": "running",
+        "llm": "Flan-T5 loaded" if llm_service.model_loaded else "mock mode",
+        "asr": "QNN NPU optimized",
+        "ocr": "ONNX models ready" if (detector_exists and recognizer_exists) else "EasyOCR fallback"
+    }
 
 import asyncio
 import concurrent.futures
