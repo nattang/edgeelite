@@ -57,16 +57,38 @@ class QNNASRServiceFixed:
             if self.qnn_available:
                 providers.insert(0, 'QNNExecutionProvider')
                 print("🚀 Using QNN NPU for ASR inference!")
+            else:
+                print("⚠️ QNN NPU not available, using CPU fallback")
+            
+            # Check if model files exist
+            if not os.path.exists(ENCODER_PATH):
+                raise FileNotFoundError(f"Encoder model not found: {ENCODER_PATH}")
+            if not os.path.exists(DECODER_PATH):
+                raise FileNotFoundError(f"Decoder model not found: {DECODER_PATH}")
             
             # Load encoder
             print(f"📥 Loading encoder from: {ENCODER_PATH}")
-            self.encoder_sess = ort.InferenceSession(ENCODER_PATH, providers=providers)
-            print(f"✅ Encoder loaded with providers: {self.encoder_sess.get_providers()}")
+            try:
+                self.encoder_sess = ort.InferenceSession(ENCODER_PATH, providers=providers)
+                print(f"✅ Encoder loaded with providers: {self.encoder_sess.get_providers()}")
+            except Exception as encoder_error:
+                print(f"❌ Encoder loading failed: {encoder_error}")
+                # Try with CPU only
+                print("🔄 Retrying encoder with CPU only...")
+                self.encoder_sess = ort.InferenceSession(ENCODER_PATH, providers=['CPUExecutionProvider'])
+                print(f"✅ Encoder loaded with CPU fallback: {self.encoder_sess.get_providers()}")
             
             # Load decoder
             print(f"📥 Loading decoder from: {DECODER_PATH}")
-            self.decoder_sess = ort.InferenceSession(DECODER_PATH, providers=providers)
-            print(f"✅ Decoder loaded with providers: {self.decoder_sess.get_providers()}")
+            try:
+                self.decoder_sess = ort.InferenceSession(DECODER_PATH, providers=providers)
+                print(f"✅ Decoder loaded with providers: {self.decoder_sess.get_providers()}")
+            except Exception as decoder_error:
+                print(f"❌ Decoder loading failed: {decoder_error}")
+                # Try with CPU only
+                print("🔄 Retrying decoder with CPU only...")
+                self.decoder_sess = ort.InferenceSession(DECODER_PATH, providers=['CPUExecutionProvider'])
+                print(f"✅ Decoder loaded with CPU fallback: {self.decoder_sess.get_providers()}")
             
             # Show model specifications
             print("\n📋 Model Specifications:")

@@ -6,6 +6,12 @@ import numpy as np
 import torch
 from pathlib import Path
 
+# Suppress CUDA warnings from EasyOCR and other libraries
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = ''
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+
 import onnxruntime as ort
 import os
 import numpy as np

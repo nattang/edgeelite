@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from asr import process_audio
+from asr import transcribe_audio
 from llm import LLMService
 from ocr.ocr import process_image
 from fastapi.middleware.cors import CORSMiddleware
@@ -171,15 +171,56 @@ async def run_journal_pipeline(session_id: str):
         
         # 1. Process session using storage system -> This triggers the backend processing process
         from storage.interface import process_session
-        node_ids = process_session(session_id)
-        print(f"📊 Session processed: {len(node_ids)} nodes created")
+        try:
+            node_ids = process_session(session_id)
+            print(f"📊 Session processed: {len(node_ids)} nodes created")
+        except ValueError as e:
+            if "does not exist" in str(e):
+                print(f"⚠️ Session {session_id} has no events (ASR/OCR may have failed)")
+                # Provide fallback response for empty sessions
+                fallback_response = "I notice this session didn't capture any content. This might happen if the audio recording timed out or if no text was detected in screenshots. Try starting a new session and ensure your microphone is working properly."
+                journal_entry = {
+                    "summary_action": fallback_response,
+                    "related_memory": None
+                }
+                journal_cache[session_id] = journal_entry
+                save_journal_entry(session_id, journal_entry)
+                print(f"✅ Journal pipeline completed with fallback for session: {session_id}")
+                return
+            else:
+                raise e
         
         # 2. Get current session text for RAG
         from storage.db import StorageDB
         db = StorageDB()
         raw_events = db.get_raw_events_by_session(session_id)
+        
+        if not raw_events:
+            print(f"⚠️ No raw events found for session {session_id}")
+            fallback_response = "No content was captured in this session. Please try again with a new session."
+            journal_entry = {
+                "summary_action": fallback_response,
+                "related_memory": None
+            }
+            journal_cache[session_id] = journal_entry
+            save_journal_entry(session_id, journal_entry)
+            print(f"✅ Journal pipeline completed with fallback for session: {session_id}")
+            return
+        
         full_doc = "\n".join(event["text"] for event in raw_events 
                             if event["source"] in ("asr", "ocr"))
+        
+        if not full_doc.strip():
+            print(f"⚠️ No valid text content found for session {session_id}")
+            fallback_response = "The session captured some data but no readable text was found. This might be due to audio quality issues or unclear screenshots."
+            journal_entry = {
+                "summary_action": fallback_response,
+                "related_memory": None
+            }
+            journal_cache[session_id] = journal_entry
+            save_journal_entry(session_id, journal_entry)
+            print(f"✅ Journal pipeline completed with fallback for session: {session_id}")
+            return
         
         # 3. Search for similar past sessions (exclude current session)
         from storage.interface import search_similar
@@ -308,44 +349,68 @@ async def asr(request: ASRRequest):
                 wav_files.sort(key=lambda x: os.path.getmtime(os.path.join(recordings_dir, x)), reverse=True)
                 latest_audio_file = os.path.join(recordings_dir, wav_files[0])
                 print(f"🎤 Processing latest audio file: {latest_audio_file}")
-                
+                error_happened = False
                 try:
                     # Run ASR processing with timeout to prevent hanging
                     loop = asyncio.get_event_loop()
                     with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = loop.run_in_executor(executor, process_audio, latest_audio_file)
-                        result = await asyncio.wait_for(future, timeout=30.0)  # 30 second timeout
-                    
+                        future = loop.run_in_executor(executor, transcribe_audio, latest_audio_file)
+                        result = await asyncio.wait_for(future, timeout=300.0)  # 5 minute timeout
                     print(f"ASR result: {result}")
                     msg = " ".join([r["text"] for r in result]).strip()
                     print(f"🎤 Transcription result: {msg}")
-                    
-                    # Store using correct function (audio expects list format)
-                    audio_data = [{
-                        "timestamp": time.time(),
-                        "text": msg,
-                        "audio_file": latest_audio_file
-                    }]
-                    store_raw_audio_event(
-                        session_id=request.session_id,
-                        source="audio",
-                        audio_data=audio_data
-                    )
-                    
                 except asyncio.TimeoutError:
-                    print("❌ ASR processing timed out after 30 seconds")
+                    print("❌ ASR processing timed out after 5 minutes")
                     msg = "ASR processing timed out - please try again"
+                    error_happened = True
                 except Exception as asr_error:
                     print(f"❌ ASR processing error: {asr_error}")
                     import traceback
                     traceback.print_exc()
                     msg = f"ASR Error: {str(asr_error)}"
+                    error_happened = True
+                # Always store an event, even if error
+                audio_data = [{
+                    "timestamp": time.time(),
+                    "text": msg,
+                    "audio_file": latest_audio_file,
+                    "error": error_happened
+                }]
+                store_raw_audio_event(
+                    session_id=request.session_id,
+                    source="audio",
+                    audio_data=audio_data
+                )
             else:
                 print("🎤 No audio files found in recordings directory")
                 msg = "No audio file found"
+                # Store placeholder event for session
+                audio_data = [{
+                    "timestamp": time.time(),
+                    "text": msg,
+                    "audio_file": None,
+                    "error": True
+                }]
+                store_raw_audio_event(
+                    session_id=request.session_id,
+                    source="audio",
+                    audio_data=audio_data
+                )
         else:
             print("🎤 Recordings directory not found")
             msg = "Recordings directory not found"
+            # Store placeholder event for session
+            audio_data = [{
+                "timestamp": time.time(),
+                "text": msg,
+                "audio_file": None,
+                "error": True
+            }]
+            store_raw_audio_event(
+                session_id=request.session_id,
+                source="audio",
+                audio_data=audio_data
+            )
         
         return {"message": msg}
         

@@ -65,62 +65,54 @@ export default function HomePage() {
     return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
   }
 
-  const startSession = async () => {
+  const startSession = () => {
     const newSessionId = generateSessionId()
     setSessionId(newSessionId)
     setIsSessionActive(true)
-    
-    // Auto-start recording when session starts
-    try {
-      await startRecording()
-      setIsListening(true)
-      setMessage(`Session started: ${newSessionId} - Recording...`)
-    } catch (error) {
-      console.error('Failed to start recording:', error)
-      setMessage(`Session started: ${newSessionId} - Recording failed to start: ${error.message}`)
-      setIsListening(false)
-    }
+    setMessage(`Session started: ${newSessionId}`)
   }
 
   const endSession = async () => {
     if (!sessionId) return
-    
     setIsSessionActive(false)
     setIsProcessing(true)
-    
     try {
-      // Stop recording and process audio first (if recording was active)
-      if (isListening) {
-        setMessage('Stopping recording and processing audio...')
-        try {
-          console.log('Stopping audio recording...')
-          const filename = await stopRecording()
-          console.log('Audio file saved as:', filename)
-          const result = await sendListenRequest(filename, sessionId)
-          console.log('Audio processing result:', result)
-          setIsListening(false)
-        } catch (audioError) {
-          console.error('Error processing audio:', audioError)
-          setMessage('Audio processing failed, but continuing with journal...')
-          setIsListening(false)
-        }
-      }
-      
       // End session and start journal processing
       await api.endSession(sessionId)
-      
       // Poll for journal results
       const result = await api.pollJournal(sessionId)
       setJournalEntry(result)
       setMessage('Journal entry generated successfully')
-      
-      // Refresh journal entries list
       await loadJournalEntries()
     } catch (error) {
       console.error('Journal processing failed:', error)
       setMessage('Failed to generate journal entry')
     } finally {
       setIsProcessing(false)
+    }
+  }
+
+  const startRecordingHandler = async () => {
+    try {
+      await startRecording()
+      setIsListening(true)
+      setMessage('Recording started')
+    } catch (error) {
+      setMessage(`Failed to start recording: ${error.message}`)
+    }
+  }
+
+  const stopRecordingHandler = async () => {
+    try {
+      setMessage('Stopping recording and processing audio...')
+      const filename = await stopRecording()
+      setIsListening(false)
+      setMessage('Audio recorded. Sending to ASR...')
+      const result = await sendListenRequest(filename, sessionId)
+      setMessage(`Audio processed: ${result}`)
+    } catch (error) {
+      setIsListening(false)
+      setMessage(`Audio processing failed: ${error.message}`)
     }
   }
 
@@ -296,17 +288,33 @@ export default function HomePage() {
         {/* Control Buttons */}
         <div className="flex gap-3 mb-4">
           <button
-            onClick={isSessionActive ? endSession : startSession}
-            disabled={isProcessing}
-            className={`px-4 py-2 rounded-lg font-medium ${
-              isSessionActive
-                ? 'bg-red-600 text-white hover:bg-red-700'
-                : 'bg-blue-600 text-white hover:bg-blue-700'
-            } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+            onClick={startSession}
+            disabled={isSessionActive || isProcessing}
+            className="px-4 py-2 rounded-lg font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-400"
           >
-            {isProcessing ? 'Processing...' : isSessionActive ? 'End Session & Create Journal' : 'Start Session & Recording'}
+            Start Session
           </button>
-
+          <button
+            onClick={endSession}
+            disabled={!isSessionActive || isProcessing}
+            className="px-4 py-2 rounded-lg font-medium bg-red-600 text-white hover:bg-red-700 disabled:bg-gray-400"
+          >
+            End Session & Create Journal
+          </button>
+          <button
+            onClick={startRecordingHandler}
+            disabled={!isSessionActive || isListening}
+            className="px-4 py-2 rounded-lg font-medium bg-yellow-600 text-white hover:bg-yellow-700 disabled:bg-gray-400"
+          >
+            Start Recording
+          </button>
+          <button
+            onClick={stopRecordingHandler}
+            disabled={!isSessionActive || !isListening}
+            className="px-4 py-2 rounded-lg font-medium bg-yellow-800 text-white hover:bg-yellow-900 disabled:bg-gray-400"
+          >
+            Stop Recording
+          </button>
           <button
             onClick={handleCapture}
             disabled={!isSessionActive || isCapturing}

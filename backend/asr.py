@@ -1,150 +1,319 @@
 #!/usr/bin/env python3
 """
-ASR Service for EdgeElite Backend - QNN NPU Optimized
-Integrates the working QNN ASR service into the backend pipeline
+ASR Service for EdgeElite Backend - QNN/CPU Fallback, Qualcomm-style
+Optimized for Snapdragon X-Elite NPU, with robust fallback and detailed logs.
 """
 
 import os
-import time
-from typing import List, Dict, Any
+import numpy as np
+import librosa
+import onnxruntime as ort
+from pathlib import Path
+from transformers import WhisperTokenizer
 
-# Import the fixed QNN ASR service
-from asr_qnn_fixed import QNNASRServiceFixed as QNNASRService
+# Model paths
+MODEL_DIR = os.path.join(os.path.dirname(__file__), "whisper-small-onnx", "onnx")
+# NPU-optimized models (QOperator format)
+ENCODER_PATH_NPU = os.path.join(MODEL_DIR, "encoder_model_npu.onnx")
+DECODER_PATH_NPU = os.path.join(MODEL_DIR, "decoder_model_npu.onnx")
+# Fallback models
+ENCODER_PATH_INT8 = os.path.join(MODEL_DIR, "encoder_model_int8.onnx")
+DECODER_PATH_INT8 = os.path.join(MODEL_DIR, "decoder_model_int8.onnx")
+ENCODER_PATH_FP32 = os.path.join(MODEL_DIR, "encoder_model.onnx")
+DECODER_PATH_FP32 = os.path.join(MODEL_DIR, "decoder_model.onnx")
 
-# Global ASR service instance
-_asr_service = None
-
-def get_asr_service():
-    """Get or create the ASR service instance."""
-    global _asr_service
-    if _asr_service is None:
-        try:
-            print("🚀 Initializing QNN ASR Service...")
-            _asr_service = QNNASRService()
-            print("✅ QNN ASR Service initialized")
-        except Exception as e:
-            print(f"❌ Failed to initialize QNN ASR Service: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
-    return _asr_service
-
-def process_audio(filename: str) -> List[Dict[str, Any]]:
-    """
-    Process audio file and return transcription results.
+# Check which models exist
+def get_available_models():
+    """Check which models are available and return paths"""
+    models = {
+        'int8': {'encoder': None, 'decoder': None},
+        'fp32': {'encoder': None, 'decoder': None}
+    }
     
-    Args:
-        filename: Path to the audio file
-        
-    Returns:
-        List of transcription segments with start, end, and text
-    """
-    try:
-        print(f"🎤 Processing audio file: {filename}")
-        
-        # Get ASR service
-        try:
-            asr_service = get_asr_service()
-        except Exception as service_error:
-            print(f"❌ ASR service initialization failed: {service_error}")
-            return [{"start": 0, "end": 0, "text": f"ASR Service Error: {str(service_error)}"}]
-        
-        # Check if file exists
-        if not os.path.exists(filename):
-            print(f"❌ Audio file not found: {filename}")
-            return [{"start": 0, "end": 0, "text": "Audio file not found"}]
-        
-        # Transcribe audio using QNN NPU
-        try:
-            start_time = time.time()
-            results = asr_service.transcribe_audio(filename)
-            total_time = time.time() - start_time
-            
-            print(f"✅ Transcription completed in {total_time:.2f}s")
-            print(f"📝 Found {len(results)} segments")
-            
-            # Format results for backend
-            formatted_results = []
-            for result in results:
-                formatted_results.append({
-                    "start": result["start"],
-                    "end": result["end"], 
-                    "text": result["text"]
-                })
-            
-            return formatted_results
-            
-        except Exception as transcribe_error:
-            print(f"❌ Transcription failed: {transcribe_error}")
-            import traceback
-            traceback.print_exc()
-            return [{"start": 0, "end": 0, "text": f"Transcription Error: {str(transcribe_error)}"}]
-        
-    except Exception as e:
-        print(f"❌ ASR processing failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return [{"start": 0, "end": 0, "text": f"ASR Error: {str(e)}"}]
-
-def process_latest_audio(recordings_dir: str) -> str:
-    """
-    Process the latest audio file in the recordings directory.
+    if os.path.exists(ENCODER_PATH_INT8):
+        models['int8']['encoder'] = ENCODER_PATH_INT8
+    if os.path.exists(DECODER_PATH_INT8):
+        models['int8']['decoder'] = DECODER_PATH_INT8
+    if os.path.exists(ENCODER_PATH_FP32):
+        models['fp32']['encoder'] = ENCODER_PATH_FP32
+    if os.path.exists(DECODER_PATH_FP32):
+        models['fp32']['decoder'] = DECODER_PATH_FP32
     
-    Args:
-        recordings_dir: Path to recordings directory
+    return models
+
+# Tokenizer - use regular Whisper tokenizer for text output
+TOKENIZER = WhisperTokenizer.from_pretrained("openai/whisper-small", language="en", task="transcribe")
+
+# QNN provider options (Qualcomm style)
+onnxruntime_dir = Path(ort.__file__).parent
+hexagon_driver = onnxruntime_dir / "capi" / "QnnHtp.dll"
+qnn_provider_options = {"backend_path": hexagon_driver}
+
+# Session options
+so = ort.SessionOptions()
+so.enable_profiling = True
+so.log_severity_level = 3
+
+# Encoder/Decoder sessions (lazy init)
+_sess_enc = None
+_sess_dec = None
+_encoder_provider = None
+_decoder_provider = None
+
+# Provider lists
+QNN_PROVIDERS = [("QNNExecutionProvider", qnn_provider_options), "CPUExecutionProvider"]
+CPU_PROVIDERS = ["CPUExecutionProvider"]
+
+def _init_sessions():
+    global _sess_enc, _sess_dec, _encoder_provider, _decoder_provider
+    # Encoder - try NPU models first, then fallback
+    if _sess_enc is None:
+        encoder_paths = [
+            (ENCODER_PATH_NPU, "NPU-optimized"),
+            (ENCODER_PATH_INT8, "INT8"),
+            (ENCODER_PATH_FP32, "FP32")
+        ]
         
-    Returns:
-        Transcribed text as string
-    """
-    try:
-        if not os.path.exists(recordings_dir):
-            print(f"❌ Recordings directory not found: {recordings_dir}")
-            return "Recordings directory not found"
-        
-        # Find latest WAV file
-        wav_files = [f for f in os.listdir(recordings_dir) if f.endswith('.wav')]
-        if not wav_files:
-            print("❌ No audio files found in recordings directory")
-            return "No audio files found"
-        
-        # Sort by modification time (newest first)
-        wav_files.sort(key=lambda x: os.path.getmtime(os.path.join(recordings_dir, x)), reverse=True)
-        latest_audio_file = os.path.join(recordings_dir, wav_files[0])
-        
-        print(f"🎵 Processing latest audio: {latest_audio_file}")
-        
-        # Process the audio
-        results = process_audio(latest_audio_file)
-        
-        # Combine all text segments
-        if results:
-            combined_text = " ".join([r["text"] for r in results if r["text"]]).strip()
-            print(f"📝 Combined transcription: {combined_text}")
-            return combined_text
+        for path, model_type in encoder_paths:
+            if os.path.exists(path):
+                try:
+                    print(f"🚀 Trying to load {model_type} encoder...")
+                    if model_type == "NPU-optimized":
+                        _sess_enc = ort.InferenceSession(path, providers=QNN_PROVIDERS, sess_options=so)
+                    else:
+                        _sess_enc = ort.InferenceSession(path, providers=CPU_PROVIDERS, sess_options=so)
+                    _encoder_provider = _sess_enc.get_providers()[0]
+                    print(f"✅ Encoder loaded with provider: {_encoder_provider} ({model_type})")
+                    break
+                except Exception as e:
+                    print(f"⚠️ {model_type} encoder failed: {e}")
+                    continue
         else:
-            return "No transcription generated"
-            
-    except Exception as e:
-        print(f"❌ Error processing latest audio: {e}")
-        return f"Error: {str(e)}"
-
-# Test function for development
-def test_asr():
-    """Test the ASR service with a sample audio file."""
-    print("🧪 Testing ASR Service...")
+            raise RuntimeError("No encoder model could be loaded")
     
-    # Test with existing audio file
-    test_file = "../recordings/audio-2025-07-13T07-04-08-677Z.wav"
-    
-    if os.path.exists(test_file):
-        print(f"🎵 Testing with: {test_file}")
-        results = process_audio(test_file)
+    # Decoder - try NPU models first, then fallback
+    if _sess_dec is None:
+        decoder_paths = [
+            (DECODER_PATH_NPU, "NPU-optimized"),
+            (DECODER_PATH_INT8, "INT8"),
+            (DECODER_PATH_FP32, "FP32")
+        ]
         
-        print("\n📋 Test Results:")
-        for result in results:
-            print(f"  {result['start']}s - {result['end']}s: {result['text']}")
-    else:
-        print(f"❌ Test file not found: {test_file}")
+        for path, model_type in decoder_paths:
+            if os.path.exists(path):
+                try:
+                    print(f"🚀 Trying to load {model_type} decoder...")
+                    if model_type == "NPU-optimized":
+                        _sess_dec = ort.InferenceSession(path, providers=QNN_PROVIDERS, sess_options=so)
+                    else:
+                        _sess_dec = ort.InferenceSession(path, providers=CPU_PROVIDERS, sess_options=so)
+                    _decoder_provider = _sess_dec.get_providers()[0]
+                    print(f"✅ Decoder loaded with provider: {_decoder_provider} ({model_type})")
+                    break
+                except Exception as e:
+                    print(f"⚠️ {model_type} decoder failed: {e}")
+                    continue
+        else:
+            raise RuntimeError("No decoder model could be loaded")
 
-if __name__ == "__main__":
-    test_asr()
+def transcribe_audio(filename):
+    print("[LOG] Starting ASR transcription")
+    _init_sessions()
+    print(f"[DEMO] Encoder provider: {_encoder_provider}, Decoder provider: {_decoder_provider}")
+    
+    # Load and preprocess audio
+    print(f"[LOG] Loading audio: {filename}")
+    wav, sr = librosa.load(filename, sr=16000)
+    print(f"[LOG] Audio loaded, length: {len(wav)/sr:.2f}s, sample rate: {sr}")
+    
+    # Check audio quality and silence
+    audio_energy = np.mean(np.abs(wav))
+    print(f"[LOG] Audio energy: {audio_energy:.4f}")
+    
+    if audio_energy < 0.01:
+        print("⚠️ Audio appears to be mostly silence")
+        return [{"start": 0, "end": float(len(wav))/sr, "text": "[No speech detected - audio too quiet]"}]
+    
+    # Normalize audio
+    wav = wav / (np.max(np.abs(wav)) + 1e-8)
+    
+    # Apply simple noise reduction (high-pass filter to remove low-frequency noise)
+    from scipy import signal
+    # High-pass filter to remove low-frequency noise
+    b, a = signal.butter(4, 100, btype='high', fs=sr)
+    wav = signal.filtfilt(b, a, wav)
+    
+    # Apply simple gain if audio is too quiet
+    if audio_energy < 0.05:
+        wav = wav * 2.0  # Amplify quiet audio
+        print("[LOG] Amplified quiet audio")
+    
+    # Limit audio length for faster processing (max 5 seconds for demo)
+    max_length = 5 * sr  # 5 seconds
+    if len(wav) > max_length:
+        wav = wav[:max_length]
+        print(f"⚠️ Audio truncated to {max_length/sr:.1f}s for faster processing")
+    
+    # Extract mel spectrogram
+    print("[LOG] Extracting mel spectrogram...")
+    mel = librosa.feature.melspectrogram(
+        y=wav, sr=sr, n_mels=80, hop_length=160, n_fft=400
+    )
+    log_mel = np.log1p(mel).astype(np.float32)
+    print(f"[LOG] Raw mel spectrogram shape: {log_mel.shape}")
+    
+    # Whisper expects 3000 time steps - pad or truncate
+    expected_time_steps = 3000
+    current_time_steps = log_mel.shape[1]
+    
+    if current_time_steps < expected_time_steps:
+        # Pad with zeros
+        padding = np.zeros((80, expected_time_steps - current_time_steps), dtype=np.float32)
+        log_mel = np.concatenate([log_mel, padding], axis=1)
+        print(f"[LOG] Padded mel spectrogram from {current_time_steps} to {expected_time_steps} time steps")
+    elif current_time_steps > expected_time_steps:
+        # Truncate
+        log_mel = log_mel[:, :expected_time_steps]
+        print(f"[LOG] Truncated mel spectrogram from {current_time_steps} to {expected_time_steps} time steps")
+    
+    # Add batch dimension
+    log_mel = log_mel[None, :, :]
+    print(f"[LOG] Final mel spectrogram shape: {log_mel.shape}")
+    
+    # Run encoder
+    print("[LOG] Running encoder...")
+    encoder_output = _sess_enc.run(None, {_sess_enc.get_inputs()[0].name: log_mel})[0]
+    print(f"[LOG] Encoder output shape: {encoder_output.shape}")
+    
+    # Fast greedy decoding with early stopping
+    # Start with <|startoftranscript|> token and force transcription task
+    decoded = [50256]  # <|startoftranscript|>
+    
+    # Force transcription task (not translation) and regular text (not phonetic)
+    # Whisper task tokens: 50258=<|transcribe|>, 50358=<|translate|>
+    # We want transcription, not translation, and regular text, not phonetic
+    decoded.append(50258)  # <|transcribe|>
+    
+    # Add language token for English (optional, but helps with accuracy)
+    decoded.append(50363)  # <|en|> (English)
+    
+    # Get decoder input names
+    decoder_input_names = [input.name for input in _sess_dec.get_inputs()]
+    print(f"[LOG] Decoder input names: {decoder_input_names}")
+    
+    # Limit decoding steps for speed
+    max_steps = 30  # Reduced for faster processing
+    print(f"[LOG] Starting decoder loop (max_steps={max_steps})...")
+    
+    for step in range(max_steps):
+        print(f"[LOG] Decoder step {step}, current tokens: {decoded}")
+        
+        # Prepare input tokens for this step
+        token = np.array([decoded], dtype=np.int64)
+        
+        # Run decoder - fix input mapping
+        input_ids_name = _sess_dec.get_inputs()[0].name  # 'input_ids' for tokens
+        encoder_hidden_states_name = _sess_dec.get_inputs()[1].name  # 'encoder_hidden_states' for encoder output
+        
+        print(f"[LOG] Decoder inputs - input_ids: {input_ids_name}, encoder_hidden_states: {encoder_hidden_states_name}")
+        print(f"[LOG] Encoder output dtype: {encoder_output.dtype}, token dtype: {token.dtype}")
+        
+        # Pass inputs in correct order
+        logits = _sess_dec.run(
+            None, {
+                input_ids_name: token,  # tokens go to input_ids
+                encoder_hidden_states_name: encoder_output  # encoder output goes to encoder_hidden_states
+            }
+        )[0]
+        print(f"[LOG] Decoder logits shape: {logits.shape}")
+        
+        # Get next token from the last position
+        next_token = np.argmax(logits[0, -1, :])
+        print(f"[LOG] Next token: {next_token}")
+        
+        # Stop if end token, but only after some content
+        if next_token == 50257:  # <|endoftranscript|>
+            if len(decoded) <= 4:  # Only special tokens, no actual content
+                print("[LOG] End token reached too early, continuing to look for speech...")
+                # Try to continue decoding by masking the end token
+                logits_copy = logits[0, -1, :].copy()
+                logits_copy[50257] = -float('inf')  # Mask end token
+                next_token = np.argmax(logits_copy)
+                print(f"[LOG] Continuing with token: {next_token}")
+            else:
+                print("[LOG] End of transcript token reached, stopping decoding loop.")
+                break
+        
+        # Filter out phonetic tokens (common IPA tokens that produce phonetic output)
+        phonetic_token_ids = [220, 135, 230, 74, 134, 108]  # Common IPA tokens
+        if next_token in phonetic_token_ids:
+            print(f"[LOG] Skipping phonetic token: {next_token}")
+            # Try to get the next best token
+            logits_copy = logits[0, -1, :].copy()
+            logits_copy[phonetic_token_ids] = -float('inf')  # Mask out phonetic tokens
+            next_token = np.argmax(logits_copy)
+            print(f"[LOG] Using alternative token: {next_token}")
+            
+        # Add to decoded sequence
+        decoded.append(int(next_token))
+        
+        # Early stopping if stuck on same token
+        if step > 3 and len(set(decoded[-3:])) == 1:
+            print(f"[LOG] Early stopping: stuck on token {decoded[-1]}")
+            break
+        
+        # Early stopping if no meaningful progress
+        if step > 15 and len(decoded) < 6:
+            print("[LOG] Early stopping: no meaningful progress in decoding loop.")
+            break
+        
+        # Force minimum content before allowing end token
+        if step < 8 and next_token == 50257:  # Increased from 5 to 8
+            print("[LOG] Forcing more content before allowing end token...")
+            logits_copy = logits[0, -1, :].copy()
+            logits_copy[50257] = -float('inf')  # Mask end token
+            next_token = np.argmax(logits_copy)
+            print(f"[LOG] Forced token: {next_token}")
+        
+        # Also force more content if we have very few tokens
+        if len(decoded) < 8 and next_token == 50257:
+            print("[LOG] Forcing more content due to short transcript...")
+            logits_copy = logits[0, -1, :].copy()
+            logits_copy[50257] = -float('inf')  # Mask end token
+            next_token = np.argmax(logits_copy)
+            print(f"[LOG] Forced token: {next_token}")
+        
+        # Early stopping if we're getting too many phonetic tokens
+        phonetic_tokens = [t for t in decoded if t in [220, 135, 230, 74, 134, 108]]  # Common IPA tokens
+        if len(phonetic_tokens) > 10:
+            print("[LOG] Early stopping: too many phonetic tokens detected.")
+            break
+    
+    # Decode to text - skip special tokens
+    print(f"[LOG] Decoding tokens to text: {decoded}")
+    
+    # Filter out special tokens for actual text
+    text_tokens = [t for t in decoded if t not in [50256, 50257, 50258, 50358, 50359, 50360, 50361, 50362]]
+    
+    if text_tokens:
+        text = TOKENIZER.decode(text_tokens)
+        text = text.strip()
+        
+        # Clean up common artifacts
+        text = text.replace("(Music", "").replace("(music", "")
+        text = text.replace("(Applause", "").replace("(applause", "")
+        text = text.replace("(Laughter", "").replace("(laughter", "")
+        text = text.replace("(Background", "").replace("(background", "")
+        
+        # Remove leading/trailing punctuation
+        text = text.strip(" .,!?;:")
+        
+        # If text is too short, it might be noise
+        if len(text) < 3:
+            text = "[No clear speech detected]"
+    else:
+        text = "[No speech detected]"
+    
+    print(f"🎤 Transcribed: '{text}'")
+    print("[LOG] ASR transcription complete.")
+    return [{"start": 0, "end": float(len(wav))/sr, "text": text}]
