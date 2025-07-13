@@ -38,6 +38,7 @@ from easyocr.utils import (
     reformat_input,
     set_result_with_confidence,
 )
+from easyocr.utils import CTCLabelConverter
 from PIL import Image
 from torch.utils.data import DataLoader
 
@@ -500,6 +501,12 @@ class EasyOCRApp_ort:
     def __init__(self, detector_session: ort.InferenceSession, recognizer_session: ort.InferenceSession):
         self.detector_session = detector_session
         self.recognizer_session = recognizer_session
+        self.ocr_reader = Reader(
+            ["en"],
+            gpu=False,
+            quantize=False,
+        )
+        self.converter = self.ocr_reader.converter
 
     # convert image to numpy array suitable for detector input
     def detector_preprocess(self, image_path: str):
@@ -563,7 +570,7 @@ class EasyOCRApp_ort:
 
 
     # crop and prepare single text region for recognizer input
-    def crop_and_prepare_region(self, image: Image, box, padding: int = 15):
+    def crop_and_prepare_region(self, image: Image, box, padding: int = 5):
         x1, y1, x2, y2 = box
 
         # Add padding and ensure box stays within image bounds
@@ -579,22 +586,30 @@ class EasyOCRApp_ort:
         region_np = np.expand_dims(region_np, axis=0)  # batch
         return region_np
 
+
+    def manual_decode(self, preds_index, char_list, blank_idx=0):
+        decoded = []
+        prev_idx = None
+        preds_index = np.ravel(preds_index)
+
+        for idx in preds_index:
+            idx = int(idx)
+            if idx != blank_idx and idx != prev_idx:
+                if idx < len(char_list):
+                    decoded.append(char_list[idx])
+            prev_idx = idx
+        return ''.join(decoded)
+
     # decode recognizer output logits to text using basic greedy CTC decoding
-    def recognizer_postprocess(self, recognizer_output, char_list, blank_idx=0):
+    def recognizer_postprocess(self, recognizer_output):
         logits = recognizer_output[0]  # shape [1, seq_len, vocab_size]
         preds_index = np.argmax(logits, axis=2)[0]  # shape [seq_len]
 
         # preds_size: length of the sequence (assuming full length here)
         preds_size = np.array([logits.shape[1]])
-
-        # Use EasyOCR's converter to decode CTC output
-        ocr_reader = Reader(
-            ['en'],
-            gpu=True,
-            quantize=False,
-        )
-        text = ocr_reader.converter.decode_greedy(preds_index, preds_size)[0]
+        text = self.converter.decode_greedy(preds_index, preds_size)[0]
         return text
+
 
     def write_text_to_file(self, text, filepath):
         with open(filepath, "w", encoding="utf-8") as f:
