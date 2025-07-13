@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
 import os
+import json
+import datetime
 
 class QueryRequest(BaseModel):
     session_id: str = Field(alias="sessionId")
@@ -81,6 +83,56 @@ app.add_middleware(
 # Journal processing cache
 journal_cache = {}
 
+# Journal entries file path
+JOURNAL_ENTRIES_FILE = "journal_entries.json"
+
+def save_journal_entry(session_id: str, entry: Dict[str, Any]):
+    """
+    Save a journal entry to the JSON file.
+    """
+    try:
+        # Read existing entries
+        if os.path.exists(JOURNAL_ENTRIES_FILE):
+            with open(JOURNAL_ENTRIES_FILE, 'r') as f:
+                entries = json.load(f)
+        else:
+            entries = []
+        
+        # Create new entry
+        new_entry = {
+            "session_id": session_id,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "summary_action": entry.get("summary_action", ""),
+            "related_memory": entry.get("related_memory", None),
+            "date": datetime.datetime.now().strftime("%Y-%m-%d"),
+            "time": datetime.datetime.now().strftime("%H:%M:%S")
+        }
+        
+        # Add to entries list (newest first)
+        entries.insert(0, new_entry)
+        
+        # Save back to file
+        with open(JOURNAL_ENTRIES_FILE, 'w') as f:
+            json.dump(entries, f, indent=2)
+        
+        print(f"✅ Journal entry saved for session: {session_id}")
+        
+    except Exception as e:
+        print(f"❌ Error saving journal entry: {e}")
+
+def load_journal_entries():
+    """
+    Load all journal entries from the JSON file.
+    """
+    try:
+        if os.path.exists(JOURNAL_ENTRIES_FILE):
+            with open(JOURNAL_ENTRIES_FILE, 'r') as f:
+                return json.load(f)
+        return []
+    except Exception as e:
+        print(f"❌ Error loading journal entries: {e}")
+        return []
+
 async def run_journal_pipeline(session_id: str):
     """
     Process a session and generate journal entry with RAG.
@@ -152,10 +204,14 @@ async def run_journal_pipeline(session_id: str):
         response = llm_service.generate_response(prompt, [])
         
         # 6. Cache for frontend polling
-        journal_cache[session_id] = {
+        journal_entry = {
             "summary_action": response,
             "related_memory": remedy_context[:200] if remedy_context else None
         }
+        journal_cache[session_id] = journal_entry
+        
+        # 7. Save to JSON file for persistent storage
+        save_journal_entry(session_id, journal_entry)
         
         print(f"✅ Journal pipeline completed for session: {session_id}")
         
@@ -419,3 +475,15 @@ async def handle_recall(request: RecallRequest):
             confidence=0.0,
             session_id=request.session_id
         )
+
+@app.get("/api/journal/entries")
+async def get_all_journal_entries():
+    """
+    Get all journal entries from the JSON file.
+    """
+    try:
+        entries = load_journal_entries()
+        return {"entries": entries, "count": len(entries)}
+    except Exception as e:
+        print(f"❌ Error fetching journal entries: {e}")
+        return {"entries": [], "count": 0, "error": str(e)}
