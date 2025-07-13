@@ -17,22 +17,21 @@ _faiss_instance: Optional[FAISSStore] = None
 
 ##Initialization functions for the database and FAISS instance
 def _get_db_instance() -> StorageDB:
-    """Get or create the database instance."""
+    """Get a singleton instance of the StorageDB with absolute path."""
     global _db_instance
-    if _db_instance is None:
-        # Use a path in the storage directory
-        db_path = os.path.join(os.path.dirname(__file__), "storage.db")
-        _db_instance = StorageDB(db_path)
+    if '_db_instance' not in globals() or _db_instance is None:
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage.db")
+        _db_instance = StorageDB(db_path=db_path)
     return _db_instance
 
 
-def _get_faiss_instance() -> FAISSStore:
-    """Get or create the FAISS instance."""
+def _get_faiss_instance() -> 'FAISSStore':
+    """Get a singleton instance of the FAISSStore with absolute path."""
     global _faiss_instance
-    if _faiss_instance is None:
-        # Use a path in the storage directory
-        index_dir = os.path.join(os.path.dirname(__file__), "faiss_index")
-        _faiss_instance = FAISSStore(index_dir)
+    if '_faiss_instance' not in globals() or _faiss_instance is None:
+        index_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "faiss_index")
+        from .faiss_store import FAISSStore
+        _faiss_instance = FAISSStore(index_dir=index_dir)
         
         # Initialize FAISS with existing nodes from database
         db = _get_db_instance()

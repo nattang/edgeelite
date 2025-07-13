@@ -148,8 +148,8 @@ def transcribe_audio(filename):
         wav = wav * 2.0  # Amplify quiet audio
         print("[LOG] Amplified quiet audio")
     
-    # Limit audio length for faster processing (max 5 seconds for demo)
-    max_length = 5 * sr  # 5 seconds
+    # Limit audio length for faster processing (max 30 seconds)
+    max_length = 30 * sr  # 30 seconds
     if len(wav) > max_length:
         wav = wav[:max_length]
         print(f"⚠️ Audio truncated to {max_length/sr:.1f}s for faster processing")

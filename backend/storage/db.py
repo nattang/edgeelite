@@ -11,8 +11,12 @@ from .utils import generate_uuid, serialize_metadata, deserialize_metadata
 class StorageDB:
     """SQLite database manager for the storage system."""
     
-    def __init__(self, db_path: str = "storage.db"):
+    def __init__(self, db_path: str = None):
         """Initialize database connection and create tables."""
+        if db_path is None:
+            # Use absolute path to ensure consistency
+            import os
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage.db")
         self.db_path = db_path
         self.init_database()
     

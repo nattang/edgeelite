@@ -50,7 +50,7 @@ def run_easyocr(image_path: str):
     }
 
     so = ort.SessionOptions()
-    so.enable_profiling = True
+    so.enable_profiling = False  # Disable profiling to reduce file clutter
     so.log_severity_level = 3
 
     try:
@@ -107,7 +107,7 @@ def run_easyocr(image_path: str):
             recognizer_outputs = recognizer_session.run(None, {"image": region_input})
             
             # TODO: look into actual char list -- could be wrong right now
-            text = ocr.recognizer_postprocess(recognizer_outputs, char_list)
+            text = ocr.recognizer_postprocess(recognizer_outputs)
             recognized_texts.append(text)
 
         full_text = "\n".join(recognized_texts)
@@ -164,7 +164,7 @@ def run_easyocr_ort(image_path: str):
     }
 
     so = ort.SessionOptions()
-    so.enable_profiling = True
+    so.enable_profiling = False  # Disable profiling to reduce file clutter
     so.log_severity_level = 3
 
     detector_session = ort.InferenceSession(detector_model_path, 

@@ -5,9 +5,15 @@ Handles vector storage and semantic search operations.
 import os
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Any
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain_core.documents import Document
+try:
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+    from langchain_community.vectorstores import FAISS
+    from langchain_core.documents import Document
+except ImportError:
+    # Fallback to regular langchain if community version not available
+    from langchain.embeddings import HuggingFaceEmbeddings
+    from langchain.vectorstores import FAISS
+    from langchain.schema import Document
 from .utils import generate_uuid
 from .cleaner import preprocess_for_embedding
 
@@ -16,7 +22,7 @@ class FAISSStore:
     """FAISS vector store manager for semantic search."""
     
     ##TODO: Will probably need to change the embedding model to the one from Qualcomm AI Hub
-    def __init__(self, index_dir: str = "faiss_index", embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
+    def __init__(self, index_dir: str = None, embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
         """
         Initialize FAISS store with embedding model.
         
@@ -24,6 +30,9 @@ class FAISSStore:
             index_dir: Directory to store FAISS index files
             embedding_model_name: HuggingFace embedding model name
         """
+        if index_dir is None:
+            # Use absolute path to ensure consistency
+            index_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "faiss_index")
         self.index_dir = index_dir
         self.embedding_model_name = embedding_model_name
         
