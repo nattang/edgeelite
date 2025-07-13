@@ -1,8 +1,8 @@
 from fastapi import FastAPI
-from ocr import CaptureRequest, process_image
+from backend.ocr import CaptureRequest, process_image
 #from asr import process_audio
-from llm import llm_service
-from asr_final import process_audio
+from backend.llm import llm_service
+from backend.asr_final import process_audio
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
