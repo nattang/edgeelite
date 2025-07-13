@@ -1,4 +1,5 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, desktopCapturer } from 'electron'
+
 
 const handler = {
   send(channel, value) {
@@ -12,6 +13,20 @@ const handler = {
       ipcRenderer.removeListener(channel, subscription)
     }
   },
+  invoke(channel, value) {
+    return ipcRenderer.invoke(channel, value)
+  },
 }
 
 contextBridge.exposeInMainWorld('ipc', handler)
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  desktopCapturer,
+  takeScreenshot: () => ipcRenderer.invoke('take-screenshot'),
+  saveAudioFile: (audioBlob) => ipcRenderer.invoke('save-audio-file', audioBlob),
+})
+
+contextBridge.exposeInMainWorld('audio', {
+  startListening: () => ipcRenderer.invoke('audio:start'),
+  stopListening: () => ipcRenderer.invoke('audio:stop')
+})
