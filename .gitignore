@@ -19,3 +19,11 @@ backend/temp_data/*
 venv
 venv/
 backend/storage/faiss_index/*
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
