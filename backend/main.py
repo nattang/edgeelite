@@ -4,10 +4,23 @@ from asr import process_audio
 #from asr_simple import process_audio
 #from asr_final import process_audio
 from llm import llm_service
+from backend.ocr.ocr import process_image
+# from backend.asr import process_audio
+# from backend.llm import llm_service
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
 import os
+
+import time
+from backend.storage.interface import (
+    store_raw_event,
+    process_session,
+    search_similar,
+    get_session_stats,
+    get_system_stats,
+    clear_all_data
+)
 
 class QueryRequest(BaseModel):
     session_id: str = Field(alias="sessionId")
@@ -35,6 +48,10 @@ class ContextRequest(BaseModel):
 
 class ASRRequest(BaseModel):
     filename: str = ""
+class CaptureRequest(BaseModel):
+    filename: str
+    session_id: str = Field(alias="sessionId")
+    timestamp: float
 
     class Config:
         allow_population_by_field_name = True
@@ -112,34 +129,17 @@ async def asr(request: ASRRequest = ASRRequest()):
 @app.post("/capture")
 async def capture(data: CaptureRequest):
     print(f"Received capture request for: {data.filename}")
-    print(data.filename)
-    
-    # Process image with OCR
-    ocr_result = process_image(data.filename)
-    
-    # Print OCR results
-    if ocr_result.get("success", False):
-        print(f"✅ OCR completed successfully!")
-        print(f"📄 Extracted text: '{ocr_result.get('text', '')}'")
-        print(f"📊 Confidence: {ocr_result.get('confidence', 0):.1f}%")
-        print(f"📝 Word count: {ocr_result.get('word_count', 0)}")
-        print(f"⏱️ Processing time: {ocr_result.get('processing_time', 0):.2f}s")
-        print(f"🖼️ Image size: {ocr_result.get('image_size', 'unknown')}")
-        
-        if ocr_result.get('note'):
-            print(f"ℹ️ Note: {ocr_result['note']}")
-            
-        # Check if this is a mock result
-        if ocr_result.get('confidence', 0) < 60:
-            print(f"⚠️ Low confidence result - this may be a fallback/mock response")
-    else:
-        print(f"❌ OCR failed: {ocr_result.get('error', 'Unknown error')}")
-        print(f"📄 No text extracted from image")
-    
-    return {
-        "message": f"Processed {data.filename}",
-        "ocr_result": ocr_result
-    }
+    # TODO: add processed image to database w session id
+    message = process_image(data.filename)
+    event_id = store_raw_event(
+        session_id=data.session_id,
+        source="ocr",
+        ts=data.timestamp,
+        text=message,
+        metadata={"screen_region": "main_editor"}
+    )
+    print(f"   Stored OCR event: {event_id[:8]}... -> '{message[:30]}...'")
+    return {"message": f"Text: {message}"}
 
 @app.post("/api/query")
 async def query_llm(request: QueryRequest):
