@@ -138,6 +138,8 @@ class FlanT5LLMService:
             # Tokenize input
             if self.tokenizer:
                 input_ids = self.tokenizer.encode(prompt, return_tensors="np", max_length=self.max_context_length, truncation=True)
+                # Ensure int64 dtype
+                input_ids = input_ids.astype(np.int64)
             else:
                 # Simple tokenization fallback
                 input_ids = np.array([[hash(word) % 1000 for word in prompt.split()[:self.max_context_length]]], dtype=np.int64)
@@ -146,7 +148,7 @@ class FlanT5LLMService:
             
             print(f"[Flan-T5] 🧠 Generating response with input length: {input_ids.shape[1]}")
             
-            # Create attention mask (all ones for valid tokens)
+            # Create attention mask (all ones for valid tokens) - ensure int64
             attention_mask = np.ones_like(input_ids, dtype=np.int64)
             
             # Run encoder
@@ -158,7 +160,7 @@ class FlanT5LLMService:
             
             print(f"[Flan-T5] ✅ Encoder completed, hidden states shape: {encoder_hidden_states.shape}")
             
-            # Initialize decoder input (start token)
+            # Initialize decoder input (start token) - ensure int64
             decoder_input_ids = np.array([[0]], dtype=np.int64)  # T5 start token
             
             # Generate response tokens
@@ -182,7 +184,9 @@ class FlanT5LLMService:
                     break
                 
                 generated_tokens.append(next_token)
-                decoder_input_ids = np.concatenate([decoder_input_ids, [[next_token]]], axis=1)
+                # Ensure the new token is int64 and concatenate
+                new_token_array = np.array([[next_token]], dtype=np.int64)
+                decoder_input_ids = np.concatenate([decoder_input_ids, new_token_array], axis=1)
             
             # Decode response
             if self.tokenizer:

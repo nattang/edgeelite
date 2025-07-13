@@ -223,6 +223,42 @@ This is a mock response - real LLM integration coming soon!
     }
     
     throw new Error('Journal processing timeout')
+  },
+
+  // Context recall query
+  contextRecall: async (sessionId, queryText) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/recall`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, queryText })
+      })
+      
+      if (!response.ok) {
+        throw new Error(`Recall query failed: ${response.status}`)
+      }
+      
+      return await response.json()
+    } catch (error) {
+      console.error('Context recall failed:', error)
+      throw error
+    }
+  },
+
+  // Get all journal entries
+  getJournalEntries: async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/journal/entries`)
+      
+      if (!response.ok) {
+        throw new Error(`Journal entries fetch failed: ${response.status}`)
+      }
+      
+      return await response.json()
+    } catch (error) {
+      console.error('Journal entries fetch failed:', error)
+      throw error
+    }
   }
 }
 
