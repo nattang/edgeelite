@@ -16,5 +16,6 @@ dist
 backend/temp_data/*
 !backend/temp_data/.gitkeep
 
+venv
 venv/
 backend/storage/faiss_index/*
