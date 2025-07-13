@@ -4,6 +4,7 @@
 # ---------------------------------------------------------------------
 # from transformers.utils.import_utils import DETECTRON2_IMPORT_ERROR
 from app import  EasyOCRApp_ort
+from trocr_app import TrocrApp
 # ort imports
 import onnxruntime as ort
 import os
@@ -12,7 +13,7 @@ from pathlib import Path
 from PIL import Image
 from easyocr.easyocr import Reader
 
-def run_ocr(image_path: str):
+def run_easyocr(image_path: str):
     base_dir = Path(__file__).parent    
     detector_model_path = base_dir / "models" / "easyocr-easyocrdetector.onnx"
     recognizer_model_path = base_dir / "models" / "easyocr-easyocrrecognizer.onnx"
@@ -84,10 +85,60 @@ def run_ocr(image_path: str):
 
     # TODO: put in database
     ocr.write_text_to_file(full_text, "./backend/ocr/scratch_data/recognized_text.txt")
-    
+
+def setup_trocr_sessions():
+    base_dir = Path(__file__).parent
+    encoder_model_path = base_dir / "models" / "ocr" / "trocr-trocrencoder.onnx"
+    decoder_model_path = base_dir / "models" / "ocr" / "trocr-trocrdecoder.onnx"
+
+    root_dir = Path.cwd().parent.parent
+    onnxruntime_dir = Path(ort.__file__).parent
+    hexagon_driver = onnxruntime_dir / "capi" / "QnnHtp.dll"
+
+    session_options = ort.SessionOptions()
+    session_options.enable_profiling = True
+    session_options.log_severity_level = 3
+
+    qnn_provider_options = {
+        "backend_path": str(hexagon_driver)
+    }
+
+    encoder_session = ort.InferenceSession(
+        encoder_model_path.as_posix(),
+        providers=[("QNNExecutionProvider", qnn_provider_options), "CPUExecutionProvider"],
+        sess_options=session_options
+    )
+
+    decoder_session = ort.InferenceSession(
+        decoder_model_path.as_posix(),
+        providers=[("QNNExecutionProvider", qnn_provider_options), "CPUExecutionProvider"],
+        sess_options=session_options
+    )
+
+    # Print encoder session input/output names
+    print("Encoder session input names:")
+    for inp in encoder_session.get_inputs():
+        print(inp.name, inp.shape, inp.type)
+
+    print("Encoder session output names:")
+    for out in encoder_session.get_outputs():
+        print(out.name, out.shape, out.type)
+
+    # Print decoder session input/output names
+    print("Decoder session input names:")
+    for inp in decoder_session.get_inputs():
+        print(inp.name, inp.shape, inp.type)
+
+    print("Decoder session output names:")
+    for out in decoder_session.get_outputs():
+        print(out.name, out.shape, out.type)
+
+    return encoder_session, decoder_session
+
+def run_trocr(image_path: str):
+    encoder_session, decoder_session = setup_trocr_sessions()
+    trocr = TrocrApp(encoder_session, decoder_session)
 
 def process_image(image_path: str):
-    run_ocr(image_path)
-
-if __name__ == "__main__":
-    process_image(r"C:\Users\HAQKATHON SCL\Pictures\Screenshots\Screenshot 2025-07-11 170005.png")
+    # run_easyocr(image_path)
+    run_trocr(image_path)
