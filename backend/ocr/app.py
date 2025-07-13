@@ -610,7 +610,6 @@ class EasyOCRApp_ort:
         text = self.converter.decode_greedy(preds_index, preds_size)[0]
         return text
 
-
     def write_text_to_file(self, text, filepath):
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(text)

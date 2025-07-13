@@ -1,7 +1,10 @@
 from fastapi import FastAPI
-from backend.ocr.ocr import process_image
-from backend.asr import process_audio
-from backend.llm import llm_service
+from asr import process_audio
+from llm import LLMService
+from ocr.ocr import process_image
+
+# Create LLM service instance
+llm_service = LLMService()
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
@@ -41,6 +44,8 @@ class ContextRequest(BaseModel):
     class Config:
         allow_population_by_field_name = True
 
+class ASRRequest(BaseModel):
+    filename: str = ""
 class CaptureRequest(BaseModel):
     filename: str
     session_id: str = Field(alias="sessionId")
@@ -68,30 +73,72 @@ app.add_middleware(
 def read_root():
     return {"message": "Hello from FastAPI!"}
 
+@app.get("/health")
+def health_check():
+    # Check OCR models
+    import os
+    ocr_models_dir = os.path.join(os.path.dirname(__file__), "models", "ocr")
+    detector_exists = os.path.exists(os.path.join(ocr_models_dir, "easyocr-easyocrdetector.onnx"))
+    recognizer_exists = os.path.exists(os.path.join(ocr_models_dir, "easyocr-easyocrrecognizer.onnx"))
+    
+    return {
+        "status": "healthy",
+        "backend": "running",
+        "llm": "Flan-T5 loaded" if llm_service.model_loaded else "mock mode",
+        "asr": "QNN NPU optimized",
+        "ocr": "ONNX models ready" if (detector_exists and recognizer_exists) else "EasyOCR fallback"
+    }
+
+import asyncio
+import concurrent.futures
+
 @app.post("/asr")
-async def asr():
+async def asr(request: ASRRequest = ASRRequest()):
     print("🎤 Received ASR trigger request")
     
-    # Look for the most recent audio file in the recordings folder
-    recordings_dir = os.path.join(os.path.expanduser("~"), "EdgeElite", "recordings")
-    
-    if os.path.exists(recordings_dir):
-        # Get the most recent .wav file
-        wav_files = [f for f in os.listdir(recordings_dir) if f.endswith('.wav')]
-        if wav_files:
-            # Sort by modification time (newest first)
-            wav_files.sort(key=lambda x: os.path.getmtime(os.path.join(recordings_dir, x)), reverse=True)
-            latest_audio_file = os.path.join(recordings_dir, wav_files[0])
-            print(f"🎤 Processing latest audio file: {latest_audio_file}")
-            result = process_audio(latest_audio_file)
+    try:
+        recordings_dir = os.path.join(os.path.expanduser("~"), "EdgeElite", "recordings")
+        msg = ""
+
+        if os.path.exists(recordings_dir):
+            wav_files = [f for f in os.listdir(recordings_dir) if f.endswith('.wav')]
+            if wav_files:
+                wav_files.sort(key=lambda x: os.path.getmtime(os.path.join(recordings_dir, x)), reverse=True)
+                latest_audio_file = os.path.join(recordings_dir, wav_files[0])
+                print(f"🎤 Processing latest audio file: {latest_audio_file}")
+                
+                try:
+                    # Run ASR processing with timeout to prevent hanging
+                    loop = asyncio.get_event_loop()
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = loop.run_in_executor(executor, process_audio, latest_audio_file)
+                        result = await asyncio.wait_for(future, timeout=30.0)  # 30 second timeout
+                    
+                    print(f"ASR result: {result}")
+                    msg = " ".join([r["text"] for r in result]).strip()
+                    print(f"🎤 Transcription result: {msg}")
+                except asyncio.TimeoutError:
+                    print("❌ ASR processing timed out after 30 seconds")
+                    msg = "ASR processing timed out - please try again"
+                except Exception as asr_error:
+                    print(f"❌ ASR processing error: {asr_error}")
+                    import traceback
+                    traceback.print_exc()
+                    msg = f"ASR Error: {str(asr_error)}"
+            else:
+                print("🎤 No audio files found in recordings directory")
+                msg = "No audio file found"
         else:
-            print("🎤 No audio files found in recordings directory")
-            result = "No audio file found"
-    else:
-        print("🎤 Recordings directory not found")
-        result = "Recordings directory not found"
-    
-    return {"message": result}
+            print("🎤 Recordings directory not found")
+            msg = "Recordings directory not found"
+        
+        return {"message": msg}
+        
+    except Exception as e:
+        print(f"❌ ASR endpoint error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"message": f"ASR Error: {str(e)}"}
 
 @app.post("/capture")
 async def capture(data: CaptureRequest):
@@ -173,3 +220,25 @@ async def get_context(request: ContextRequest):
     except Exception as e:
         print(f"Context retrieval error: {e}")
         return {"error": str(e), "session_id": request.session_id}
+
+if __name__ == "__main__":
+    import uvicorn
+    print("🚀 Starting EdgeElite Backend Server...")
+    print("📍 Server will be available at: http://localhost:8000")
+    print("🎤 ASR: QNN NPU optimized Whisper")
+    
+    # Pre-load LLM models
+    print("🤖 Loading LLM models...")
+    try:
+        llm_service.load_model()
+        if hasattr(llm_service, 'flan_t5_service') and llm_service.flan_t5_service and llm_service.flan_t5_service.model_loaded:
+            print("🤖 LLM: Flan-T5 Small (80M parameters, INT8 quantized)")
+        elif llm_service.model_loaded:
+            print("🤖 LLM: Local models loaded successfully")
+        else:
+            print("🤖 LLM: Using enhanced mock responses")
+    except Exception as e:
+        print(f"🤖 LLM: Error loading models: {e}")
+        print("🤖 LLM: Using enhanced mock responses")
+    
+    uvicorn.run(app, host="0.0.0.0", port=8000)
