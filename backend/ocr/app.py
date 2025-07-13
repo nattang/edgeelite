@@ -29,6 +29,7 @@ from typing import Callable
 
 import cv2
 import numpy as np
+import re
 import torch
 import torch.nn.functional as F
 from easyocr.craft_utils import adjustResultCoordinates, getDetBoxes
@@ -43,6 +44,7 @@ from easyocr.utils import (
     reformat_input,
     set_result_with_confidence,
 )
+from easyocr.utils import CTCLabelConverter
 from PIL import Image
 from torch.utils.data import DataLoader
 
@@ -505,6 +507,12 @@ class EasyOCRApp_ort:
     def __init__(self, detector_session: ort.InferenceSession, recognizer_session: ort.InferenceSession):
         self.detector_session = detector_session
         self.recognizer_session = recognizer_session
+        self.ocr_reader = Reader(
+            ["en"],
+            gpu=False,
+            quantize=False,
+        )
+        self.converter = self.ocr_reader.converter
 
     # convert image to numpy array suitable for detector input
     def detector_preprocess(self, image_path: str):
@@ -536,9 +544,15 @@ class EasyOCRApp_ort:
         # Save or display the heatmap
         cv2.imwrite("./backend/ocr/scratch_data/score_map_heatmap.png", heatmap)
 
-        # Find contours
-        contours, _ = cv2.findContours(thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        # kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5))  # Wider than tall to group lines
+        # dilated = cv2.dilate(thresh, kernel, iterations=2)
+        # cv2.imwrite("./backend/ocr/scratch_data/dilated.png", dilated)
 
+        contours, _ = cv2.findContours(thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        contour_debug = heatmap.copy()
+        cv2.drawContours(contour_debug, contours, -1, (0, 255, 0), 1)
+        cv2.imwrite("./backend/ocr/scratch_data/contours_debug.png", contour_debug)
+        
         input_h, input_w = score_map.shape
         orig_w, orig_h = orig_image.size
 
@@ -558,7 +572,8 @@ class EasyOCRApp_ort:
                 y2 = int((y + h) * scale_y)
                 boxes.append((x1, y1, x2, y2))
 
-        return boxes
+        return boxes 
+
 
     # crop and prepare single text region for recognizer input
     def crop_and_prepare_region(self, image: Image, box, padding: int = 5):
@@ -577,21 +592,28 @@ class EasyOCRApp_ort:
         region_np = np.expand_dims(region_np, axis=0)  # batch
         return region_np
 
+
+    def manual_decode(self, preds_index, char_list, blank_idx=0):
+        decoded = []
+        prev_idx = None
+        preds_index = np.ravel(preds_index)
+
+        for idx in preds_index:
+            idx = int(idx)
+            if idx != blank_idx and idx != prev_idx:
+                if idx < len(char_list):
+                    decoded.append(char_list[idx])
+            prev_idx = idx
+        return ''.join(decoded)
+
     # decode recognizer output logits to text using basic greedy CTC decoding
-    def recognizer_postprocess(self, recognizer_output, char_list, blank_idx=0):
+    def recognizer_postprocess(self, recognizer_output):
         logits = recognizer_output[0]  # shape [1, seq_len, vocab_size]
         preds_index = np.argmax(logits, axis=2)[0]  # shape [seq_len]
 
         # preds_size: length of the sequence (assuming full length here)
         preds_size = np.array([logits.shape[1]])
-
-        # Use EasyOCR's converter to decode CTC output
-        ocr_reader = Reader(
-            ['en'],
-            gpu=True,
-            quantize=False,
-        )
-        text = ocr_reader.converter.decode_greedy(preds_index, preds_size)[0]
+        text = self.converter.decode_greedy(preds_index, preds_size)[0]
         return text
 
     def write_text_to_file(self, text, filepath):
@@ -624,3 +646,21 @@ class EasyOCRApp_ort:
         # Save the image
         cv2.imwrite(output_path, image_cv)
         print(f"Saved image with boxes to: {output_path}")
+
+    def extract_recognizable_words(self, raw_text: str, min_len: int = 3):
+        words = re.findall(r'\b[\w-]{%d,}\b' % min_len, raw_text)
+        filtered = []
+
+        for word in words:
+            # Drop all-uppercase gibberish words like 'XCCF', '4EeTe~', etc.
+            if word.isupper() and not word.isalpha():
+                continue
+            # Drop mostly symbols
+            if re.fullmatch(r'[^a-zA-Z0-9]+', word):
+                continue
+            # Drop words with more punctuation than letters
+            if sum(c.isalpha() for c in word) < len(word) / 2:
+                continue
+            filtered.append(word)
+
+        return filtered
