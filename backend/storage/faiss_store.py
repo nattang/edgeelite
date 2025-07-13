@@ -5,9 +5,9 @@ Handles vector storage and semantic search operations.
 import os
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Any
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import FAISS
-from langchain.docstore.document import Document
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_core.documents import Document
 from .utils import generate_uuid
 from .cleaner import preprocess_for_embedding
 

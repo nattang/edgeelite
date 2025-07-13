@@ -16,3 +16,15 @@ dist
 backend/temp_data/*
 !backend/temp_data/.gitkeep
 backend/models/
+
+venv
+venv/
+backend/storage/faiss_index/*
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
