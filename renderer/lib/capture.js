@@ -33,6 +33,7 @@ export const sendCaptureRequest = async (filename, sessionId = null, timestamp =
         // Don't fail the capture if event storage fails
       }
     }
+    console.log('Capture request successful:', data)
     return data
   } catch (error) {
     console.error('Capture error:', error)

@@ -198,56 +198,79 @@ export default function HomePage() {
   }
   // Tutor tab functions
   const handleExplain = async () => {
-  setIsTutorProcessing(true)
-  setTutorMessage('Generating explanation...')
-  try {
-    const response = await api.queryLLM(tutorInput)
-    setTutorExplanation(response.explanation)
-    setTutorMessage('Explanation generated.')
-  } catch (error) {
-    console.error('Explain error:', error)
-    setTutorMessage('Failed to generate explanation.')
-  } finally {
-    setIsTutorProcessing(false)
+    setIsTutorProcessing(true)
+    setTutorMessage('Generating explanation...')
+    try {
+      const response = await api.queryLLM(tutorSessionId, `Explain this concept in simple terms: ${tutorInput}`)
+      setTutorExplanation(response.response || '')
+      setTutorMessage('Explanation generated.')
+    } catch (error) {
+      console.error('Explain error:', error)
+      setTutorMessage('Failed to generate explanation.')
+    } finally {
+      setIsTutorProcessing(false)
+    }
   }
-}
 
 const handleQuiz = async () => {
-  setIsTutorProcessing(true)
-  setTutorMessage('Generating quiz...')
-  try {
-    const response = await api.queryLLM(tutorInput)
-    setTutorQuiz(response.questions || [])
-    setTutorMessage('Quiz generated.')
-  } catch (error) {
-    console.error('Quiz error:', error)
-    setTutorMessage('Failed to generate quiz.')
-  } finally {
-    setIsTutorProcessing(false)
+    setIsTutorProcessing(true)
+    setTutorMessage('Generating quiz...')
+    try {
+      const response = await api.queryLLM(tutorSessionId, `Generate 5 multiple choice quiz questions from the following text: ${tutorInput}`)
+      const quizQuestions = response.response
+        ? response.response.split('\n').filter(line => line.trim().length > 0)
+        : []
+      setTutorQuiz(quizQuestions)
+      setTutorMessage('Quiz generated.')
+    } catch (error) {
+      console.error('Quiz error:', error)
+      setTutorMessage('Failed to generate quiz.')
+    } finally {
+      setIsTutorProcessing(false)
+    }
   }
-}
 
 const handleTutorCapture = async () => {
+  if (!isTutorSessionActive) {
+    setTutorMessage('Please start a tutor session first')
+    return
+  }
+
   if (isCapturing) return
+
   setIsCapturing(true)
-  setTutorMessage('Capturing screenshot and running OCR...')
+  setTutorMessage('Taking screenshot...')
 
   try {
     const result = await window.electronAPI.takeScreenshot()
     if (result.success) {
-      const ocrResponse = await sendCaptureRequest(result.filePath, 'tutor') 
-      setTutorInput(ocrResponse.text) // Assuming response includes .text
-      setTutorMessage('OCR complete. You can now generate explanation or quiz.')
+      setScreenshot(result.image)
+      setTutorMessage(`Screenshot captured at ${result.timestamp}. Saved to: ${result.filePath}`)
+
+      // Send to OCR and store event
+      try {
+        const ocrResponse = await sendCaptureRequest(result.filePath, tutorSessionId, result.timestamp)
+        if (ocrResponse.message) {
+          setTutorInput(ocrResponse.message)
+          setTutorMessage('Screenshot processed. Text extracted and ready.')
+        } else {
+          setTutorMessage('Screenshot processed but no text extracted.')
+        }
+      } catch (ocrError) {
+        console.warn('OCR failed:', ocrError.message)
+        setTutorMessage(`OCR failed: ${ocrError.message}`)
+      }
     } else {
       setTutorMessage(`Screenshot failed: ${result.error}`)
     }
   } catch (error) {
     console.error('Tutor capture error:', error)
-    setTutorMessage(`Capture or OCR error: ${error.message}`)
+    setTutorMessage(`Capture error: ${error.message}`)
   } finally {
     setIsCapturing(false)
   }
 }
+
   // Tutor session functions
   const startTutorSession = () => {
     const newSessionId = generateSessionId()
