@@ -7,6 +7,16 @@ from pydantic import BaseModel, Field
 from typing import List, Dict, Any
 import os
 
+import time
+from backend.storage.interface import (
+    store_raw_event,
+    process_session,
+    search_similar,
+    get_session_stats,
+    get_system_stats,
+    clear_all_data
+)
+
 class QueryRequest(BaseModel):
     session_id: str = Field(alias="sessionId")
     user_input: str = Field(alias="userInput")
@@ -34,6 +44,7 @@ class ContextRequest(BaseModel):
 class CaptureRequest(BaseModel):
     filename: str
     session_id: str = Field(alias="sessionId")
+    timestamp: float
 
     class Config:
         allow_population_by_field_name = True
@@ -86,7 +97,15 @@ async def asr():
 async def capture(data: CaptureRequest):
     print(f"Received capture request for: {data.filename}")
     # TODO: add processed image to database w session id
-    message  = process_image(data.filename)
+    message = process_image(data.filename)
+    event_id = store_raw_event(
+        session_id=data.session_id,
+        source="ocr",
+        ts=data.timestamp,
+        text=message,
+        metadata={"screen_region": "main_editor"}
+    )
+    print(f"   Stored OCR event: {event_id[:8]}... -> '{message[:30]}...'")
     return {"message": f"Text: {message}"}
 
 @app.post("/api/query")

@@ -1,6 +1,6 @@
 
 from __future__ import annotations
-from PIL import Image as PILImage
+from PIL import Image
 import cv2
 import numpy as np
 import torch
@@ -37,7 +37,7 @@ from easyocr.utils import (
     reformat_input,
     set_result_with_confidence,
 )
-from PIL import Image as PILImage
+from PIL import Image
 from torch.utils.data import DataLoader
 
 from qai_hub_models.utils.draw import draw_box_from_xyxy
@@ -439,7 +439,7 @@ class EasyOCRAppDemo:
     def predict(self, *args, **kwargs):
         return self.predict_text_from_image(*args, **kwargs)
 
-    def predict_text_from_image(self, pixel_values_or_image: np.ndarray | PILImage.Image):
+    def predict_text_from_image(self, pixel_values_or_image: np.ndarray | Image.Image):
         """
         From provided array or image, predict (bounding box of texts, text, scores)
 
@@ -482,17 +482,17 @@ class EasyOCRAppDemo:
         )
 
         coords = [item[0] for item in list_result]
-        for coord in coords:
-            draw_box_from_xyxy(
-                NHWC_int_numpy_frame,
-                tuple(coord[0]),
-                tuple(coord[2]),
-                color=(0, 255, 0),
-                size=2,
-            )
+        # for coord in coords:
+        #     draw_box_from_xyxy(
+        #         NHWC_int_numpy_frame,
+        #         tuple(coord[0]),
+        #         tuple(coord[2]),
+        #         color=(0, 255, 0),
+        #         size=2,
+        #     )
 
         print(list_result)
-        return (PILImage.fromarray(NHWC_int_numpy_frames[0]), list_result)
+        return (Image.fromarray(NHWC_int_numpy_frames[0]), list_result)
 
 
 class EasyOCRApp_ort:
@@ -502,7 +502,7 @@ class EasyOCRApp_ort:
 
     # convert image to numpy array suitable for detector input
     def detector_preprocess(self, image_path: str):
-        img = PILImage.open(image_path).convert("RGB")
+        img = Image.open(image_path).convert("RGB")
         img = img.resize((800, 608))  
         img_np = np.asarray(img).astype(np.float32)
         img_np = img_np.transpose(2, 0, 1)
@@ -521,10 +521,15 @@ class EasyOCRApp_ort:
         score_map = results[0, :, :, 0]
 
         # Threshold score map
-        thresh = (score_map > 0.05).astype(np.uint8) * 255
+        thresh = (score_map > 0.1).astype(np.uint8) * 255
         print("Score map stats:")
         print(f"min: {score_map.min()}, max: {score_map.max()}, mean: {score_map.mean()}")
-        print("Threshold mask unique values:", np.unique(thresh))
+        score_map_vis = (score_map * 255).clip(0, 255).astype(np.uint8)
+        heatmap = cv2.applyColorMap(score_map_vis, cv2.COLORMAP_JET)
+
+        # Save or display the heatmap
+        cv2.imwrite("./backend/ocr/scratch_data/score_map_heatmap.png", heatmap)
+
         # Find contours
         contours, _ = cv2.findContours(thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -540,7 +545,7 @@ class EasyOCRApp_ort:
             approx = cv2.approxPolyDP(cnt, epsilon, True)
             x, y, w, h = cv2.boundingRect(approx)
             
-            if w > 10 and h > 10:
+            if w > 10 and h > 5:
                 x1 = int(x * scale_x)
                 y1 = int(y * scale_y)
                 x2 = int((x + w) * scale_x)
@@ -550,7 +555,7 @@ class EasyOCRApp_ort:
         return boxes
 
     # crop and prepare single text region for recognizer input
-    def crop_and_prepare_region(self, image: PILImage.Image, box, padding: int = 5):
+    def crop_and_prepare_region(self, image: Image, box, padding: int = 5):
         x1, y1, x2, y2 = box
 
         # Add padding and ensure box stays within image bounds
@@ -560,7 +565,7 @@ class EasyOCRApp_ort:
         y2 = min(y2 + padding, image.height)
 
         region = image.crop((x1, y1, x2, y2)).convert("L")  # grayscale
-        region = region.resize((1000, 64), PILImage.Resampling.BILINEAR)  # recognizer input size
+        region = region.resize((1000, 64), Image.BILINEAR)  # recognizer input size
         region_np = np.array(region).astype(np.float32) / 255.0
         region_np = np.expand_dims(region_np, axis=0)  # channel
         region_np = np.expand_dims(region_np, axis=0)  # batch
@@ -588,10 +593,10 @@ class EasyOCRApp_ort:
             f.write(text)
 
     # runs recognizer onnx model
-    def recognizer_inference(self, input_tensor: torch.Tensor):
+    def recognizer_inference(self, input_tensor: np.ndarray):
         return self.recognizer_session.run(None, {"input": input_tensor})
 
-    def draw_boxes_on_image(self, image: PILImage.Image, boxes: list[tuple[int, int, int, int]], output_path: str):
+    def draw_boxes_on_image(self, image: Image.Image, boxes: list[tuple[int, int, int, int]], output_path: str):
         """
         Draw bounding boxes on the image and save the result.
 

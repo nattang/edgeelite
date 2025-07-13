@@ -1,13 +1,14 @@
 import { api } from './api.js'
 
-export const sendCaptureRequest = async (filename, sessionId = null) => {
+export const sendCaptureRequest = async (filename, sessionId = null, timestamp = null) => {
   try {
     const res = await fetch('http://localhost:8000/capture', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         filename: filename,
-        sessionId: sessionId
+        sessionId: sessionId,
+        timestamp: Date.now()
        })
     })
 

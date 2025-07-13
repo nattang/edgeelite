@@ -161,8 +161,10 @@ def run_easyocr_ort(image_path: str):
     char_list = reader.character
     char_list = list(char_list)
 
+    print("Number of boxes: ", len(boxes))
     for box in boxes:
         region_input = ocr.crop_and_prepare_region(original_image, box)
+        print("running recognizer session")
         recognizer_outputs = recognizer_session.run(None, {"image": region_input})
         
         # TODO: look into actual char list -- could be wrong right now
@@ -172,8 +174,6 @@ def run_easyocr_ort(image_path: str):
     full_text = "\n".join(recognized_texts)
     print("results: ", full_text)
     return full_text
-
-
 
 def setup_trocr_sessions():
     base_dir = Path(__file__).parent.parent
@@ -304,15 +304,11 @@ def run_easyocr_ort_test(image_path: str):
 
 
 def run_easyocr_demo(image_path: str):
-    INPUT_IMAGE_ADDRESS = CachedWebModelAsset.from_asset_store(
-        MODEL_ID, MODEL_ASSET_VERSION, "english.png"
-    )
-
     # Load app and image
     parser = get_model_cli_parser(EasyOCR)
     parser = get_on_device_demo_parser(parser, add_output_dir=True)
     args = parser.parse_args(None)
-    image = load_image(INPUT_IMAGE_ADDRESS)
+    image = load_image(image_path)
     model = model_from_cli_args(EasyOCR, args)
     app = EasyOCRAppDemo(model.detector, model.recognizer, model.lang_list)
     print("Model Loaded")
@@ -320,12 +316,16 @@ def run_easyocr_demo(image_path: str):
     results = app.predict_text_from_image(image)
 
 def process_image(image_path: str):
-    run_easyocr(image_path)
+    # run_easyocr(image_path)
+    return run_easyocr_ort(image_path)
     # run_trocr(image_path)
 
-if __name__ == "__main__":
-    # run_easyocr_ort(r"C:\Users\HAQKATHON SCL\Downloads\maxresdefault.jpg")
+# if __name__ == "__main__":
+    # run_easyocr_ort_test(r"C:\Users\HAQKATHON SCL\Downloads\maxresdefault.jpg")
     # run_easyocr_ort_test(r"C:\Users\HAQKATHON SCL\Pictures\Screenshots\Screenshot 2025-07-11 170005.png")
 
-    # run_easyocr_demo(r"C:\Users\HAQKATHON SCL\Downloads\maxresdefault.jpg")\
-    run_easyocr_ort_test(r"C:\Users\HAQKATHON SCL\Downloads\maxresdefault.jpg")
+    # run_easyocr_demo(r"C:\Users\HAQKATHON SCL\Downloads\maxresdefault.jpg")
+    # run_easyocr_demo(r"C:\Users\HAQKATHON SCL\Pictures\Screenshots\Screenshot 2025-07-11 170005.png")
+    # run_easyocr_ort_test(r"C:\Users\HAQKATHON SCL\Downloads\maxresdefault.jpg")
+    # run_easyocr_ort(r"C:\Users\HAQKATHON SCL\Downloads\maxresdefault.jpg")
+    # run_easyocr_ort(r"C:\Users\HAQKATHON SCL\Pictures\Screenshots\Screenshot 2025-07-11 170005.png")
