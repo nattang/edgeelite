@@ -29,6 +29,13 @@ export default function HomePage() {
   const [isVoiceListening, setIsVoiceListening] = React.useState(false)
   const [assistantResponse, setAssistantResponse] = React.useState(null)
   const [voiceQueryManager] = React.useState(() => new VoiceQueryManager())
+  
+  // Recall tab specific state
+  const [recallSessionId, setRecallSessionId] = React.useState(null)
+  const [isRecallSessionActive, setIsRecallSessionActive] = React.useState(false)
+  const [recallQuery, setRecallQuery] = React.useState('')
+  const [recallResponse, setRecallResponse] = React.useState(null)
+  const [isRecallProcessing, setIsRecallProcessing] = React.useState(false)
 
   React.useEffect(() => {
     window.ipc.on('message', (msg) => {
@@ -193,6 +200,77 @@ export default function HomePage() {
     setMessage('Voice recall stopped')
   }
 
+  // Recall tab session functions
+  const startRecallSession = () => {
+    const newSessionId = generateSessionId()
+    setRecallSessionId(newSessionId)
+    setIsRecallSessionActive(true)
+    setMessage(`Recall session started: ${newSessionId}`)
+  }
+
+  const endRecallSession = () => {
+    setIsRecallSessionActive(false)
+    setRecallSessionId(null)
+    setRecallResponse(null)
+    setMessage('Recall session ended')
+  }
+
+  const handleRecallCapture = async () => {
+    if (!isRecallSessionActive) {
+      setMessage('Please start a recall session first')
+      return
+    }
+
+    if (isCapturing) return
+
+    setIsCapturing(true)
+    setMessage('Taking screenshot...')
+
+    try {
+      const result = await window.electronAPI.takeScreenshot()
+      console.log('Screenshot taken:', result)
+      setScreenshot(result)
+      
+      // Send capture request to backend
+      await sendCaptureRequest(result.filePath, recallSessionId)
+      setMessage('Screenshot processed and stored')
+    } catch (error) {
+      console.error('Capture error:', error)
+      setMessage(`Capture error: ${error.message}`)
+    } finally {
+      setIsCapturing(false)
+    }
+  }
+
+  const handleRecallQuery = async (e) => {
+    e.preventDefault()
+    
+    if (!recallQuery.trim()) {
+      setMessage('Please enter a query')
+      return
+    }
+
+    if (!recallSessionId) {
+      setMessage('Please start a recall session first')
+      return
+    }
+
+    setIsRecallProcessing(true)
+    setMessage('Processing recall query...')
+
+    try {
+      const response = await api.contextRecall(recallSessionId, recallQuery)
+      setRecallResponse(response)
+      setMessage('Recall query processed successfully')
+      setRecallQuery('') // Clear the query after successful submission
+    } catch (error) {
+      console.error('Recall query error:', error)
+      setMessage(`Recall query error: ${error.message}`)
+    } finally {
+      setIsRecallProcessing(false)
+    }
+  }
+
   const renderJournalTab = () => (
     <div className="space-y-6">
       <div className="bg-white rounded-lg shadow p-6">
@@ -300,46 +378,108 @@ export default function HomePage() {
   const renderRecallTab = () => (
     <div className="space-y-6">
       <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-xl font-semibold mb-4">Voice Context Recall</h2>
+        <h2 className="text-xl font-semibold mb-4">Context Recall</h2>
         <p className="text-gray-600 mb-6">
           Ask EdgeElite to recall information from your previous conversations.
         </p>
 
-        {/* Voice Recall Controls */}
-        <div className="flex gap-3 mb-4">
-          <button
-            onClick={isVoiceListening ? stopVoiceRecall : startVoiceRecall}
-            className={`px-4 py-2 rounded-lg font-medium ${
-              isVoiceListening 
-                ? 'bg-red-600 text-white hover:bg-red-700' 
-                : 'bg-green-600 text-white hover:bg-green-700'
-            }`}
-          >
-            {isVoiceListening ? '🛑 Stop Voice Recall' : '🎤 Start Voice Recall'}
-          </button>
+        {/* Session Status */}
+        <div className="bg-gray-100 rounded-lg p-4 mb-4">
+          <div className="flex items-center justify-between">
+            <span className="font-medium">Recall Session Status:</span>
+            <span className={`px-3 py-1 rounded-full text-sm ${
+              isRecallSessionActive ? 'bg-green-200 text-green-800' : 'bg-gray-200'
+            }`}>
+              {isRecallSessionActive ? 'Active' : 'Inactive'}
+            </span>
+          </div>
+          {recallSessionId && (
+            <div className="text-sm text-gray-600 mt-2">
+              Session ID: {recallSessionId}
+            </div>
+          )}
         </div>
 
-        {isVoiceListening && (
-          <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
-            <div className="flex items-center text-green-700">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-3"></div>
-              <span className="font-medium">Listening for voice queries...</span>
-            </div>
-            <p className="text-sm text-green-600 mt-2">
-              Try saying: "EdgeElite, what did I say about Project X?"
-            </p>
-          </div>
-        )}
+        {/* Control Buttons */}
+        <div className="flex gap-3 mb-4">
+          <button
+            onClick={isRecallSessionActive ? endRecallSession : startRecallSession}
+            className={`px-4 py-2 rounded-lg font-medium ${
+              isRecallSessionActive
+                ? 'bg-red-600 text-white hover:bg-red-700'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+            }`}
+          >
+            {isRecallSessionActive ? 'End Session' : 'Start Session'}
+          </button>
+
+          <button
+            onClick={handleRecallCapture}
+            disabled={!isRecallSessionActive || isCapturing}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400"
+          >
+            {isCapturing ? 'Capturing...' : '📸 Screenshot'}
+          </button>
+        </div>
 
         {/* Message Display */}
         <div className="bg-gray-50 rounded p-3 mb-4">
           <p className="text-sm text-gray-700">{message}</p>
         </div>
 
+        {/* Chat Interface */}
+        <div className="border rounded-lg p-4 mb-4">
+          <h3 className="font-medium mb-3">Ask a Question</h3>
+          <form onSubmit={handleRecallQuery} className="flex gap-2">
+            <input
+              type="text"
+              value={recallQuery}
+              onChange={(e) => setRecallQuery(e.target.value)}
+              placeholder="What did I say about Project X?"
+              className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={isRecallProcessing}
+            />
+            <button
+              type="submit"
+              disabled={isRecallProcessing || !recallQuery.trim()}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
+            >
+              {isRecallProcessing ? 'Processing...' : 'Ask'}
+            </button>
+          </form>
+        </div>
+
+        {/* Recall Response */}
+        {recallResponse && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <h4 className="font-medium text-blue-900 mb-2">EdgeElite says:</h4>
+            <p className="text-blue-800 mb-3">{recallResponse.answer}</p>
+            
+            {recallResponse.sources && recallResponse.sources.length > 0 && (
+              <details className="mt-3">
+                <summary className="cursor-pointer text-sm text-blue-700 hover:text-blue-800">
+                  View Sources ({recallResponse.sources.length})
+                </summary>
+                <div className="mt-2 space-y-2">
+                  {recallResponse.sources.map((source, index) => (
+                    <div key={index} className="bg-blue-100 p-2 rounded text-sm">
+                      {source.content}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+            
+            <div className="text-xs text-blue-600 mt-2">
+              Confidence: {Math.round(recallResponse.confidence * 100)}%
+            </div>
+          </div>
+        )}
+
         {/* Demo Instructions */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h4 className="font-medium text-blue-900 mb-2">Demo Commands:</h4>
-          <ul className="text-sm text-blue-700 space-y-1">
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+          <h4 className="font-medium text-gray-900 mb-2">Try these questions:</h4>
+          <ul className="text-sm text-gray-700 space-y-1">
             <li>• "What did I say about Project X?"</li>
             <li>• "Remind me about the marketing budget"</li>
             <li>• "What was mentioned about scheduling?"</li>
@@ -390,13 +530,16 @@ export default function HomePage() {
         {activeTab === 'recall' && renderRecallTab()}
 
         {/* Related Memory Modal */}
-        {showRelatedModal && journalEntry?.related_memory && (
+        {showRelatedModal && selectedRelatedMemory && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
               <h3 className="text-lg font-semibold mb-3">Related Memory</h3>
-              <p className="text-gray-700 mb-4">{journalEntry.related_memory}</p>
+              <p className="text-gray-700 mb-4">{selectedRelatedMemory}</p>
               <button
-                onClick={() => setShowRelatedModal(false)}
+                onClick={() => {
+                  setShowRelatedModal(false)
+                  setSelectedRelatedMemory(null)
+                }}
                 className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
               >
                 Close
