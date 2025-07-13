@@ -58,7 +58,7 @@ export default function HomePage() {
         
         // Send to OCR and store event
         try {
-          await sendCaptureRequest(result.filePath, sessionId)
+          await sendCaptureRequest(result.filePath, sessionId, result.timestamp)
           setMessage(`Screenshot captured and processed. Event stored for session: ${sessionId}`)
         } catch (ocrError) {
           console.warn('OCR processing failed:', ocrError.message)

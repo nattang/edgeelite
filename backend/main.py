@@ -1,12 +1,22 @@
 from fastapi import FastAPI
-from backend.ocr import CaptureRequest, process_image
-#from asr import process_audio
+from backend.ocr.ocr import process_image
+from backend.asr import process_audio
 from backend.llm import llm_service
 from backend.asr_final import process_audio
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
 import os
+
+import time
+from backend.storage.interface import (
+    store_raw_event,
+    process_session,
+    search_similar,
+    get_session_stats,
+    get_system_stats,
+    clear_all_data
+)
 
 class QueryRequest(BaseModel):
     session_id: str = Field(alias="sessionId")
@@ -190,18 +200,17 @@ async def capture(data: CaptureRequest):
     from storage.interface import store_raw_ocr_event
     
     print(f"Received capture request for: {data.filename}")
-    result = process_image(data.filename)
-    
-    # Store in database using correct function
-    store_raw_ocr_event(
+    # TODO: add processed image to database w session id
+    message = process_image(data.filename)
+    event_id = store_raw_event(
         session_id=data.session_id,
         source="ocr",
-        ts=time.time(),
-        text=result,
-        metadata={"image_file": data.filename}
+        ts=data.timestamp,
+        text=message,
+        metadata={"screen_region": "main_editor"}
     )
-    
-    return {"message": f"Processed {data.filename}"}
+    print(f"   Stored OCR event: {event_id[:8]}... -> '{message[:30]}...'")
+    return {"message": f"Text: {message}"}
 
 @app.post("/api/query")
 async def query_llm(request: QueryRequest):
