@@ -1,8 +1,4 @@
-# ---------------------------------------------------------------------
-# Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
-# SPDX-License-Identifier: BSD-3-Clause
-# ---------------------------------------------------------------------
-# from transformers.utils.import_utils import DETECTRON2_IMPORT_ERROR
+
 import sys
 import os
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))

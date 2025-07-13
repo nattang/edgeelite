@@ -362,16 +362,21 @@ async def capture(data: CaptureRequest):
     
     print(f"Received capture request for: {data.filename}")
     result = process_image(data.filename)
+    # pass result into llm_service 
+    summarized_text = llm_service.generate_response(
+        f"Summarize this OCR text in a concise way: {result}",
+        []
+    )
     
     # Store in database using correct function
     store_raw_ocr_event(
         session_id=data.session_id,
         source="ocr",
         ts=time.time(),
-        text=result,
+        text=summarized_text,
         metadata={"image_file": data.filename}
     )
-    
+    print(f"Summarized text: {summarized_text}")
     return {"message": f"Processed {data.filename}"}
 
 @app.post("/api/query")

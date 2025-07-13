@@ -31,3 +31,5 @@ __pycache__/
 
 **/__pycache__/
 backend/storage/storage.db
+
+onnxruntime_profile_
