@@ -5,9 +5,7 @@
 
 # EdgeElite
 
-EdgeElite is a full-stack AI desktop application built with Electron, React, and FastAPI. It runs OCR (Optical Character Recognition) **locally** using ONNX models, enabling secure and fast text extraction from images without relying on external servers or APIs.
-
-Designed for privacy-conscious users and edge devices, EdgeElite showcases the power of deploying AI models on-device using modern web and Python technologies.
+EdgeElite addresses the real-world gap in context-aware productivity tools by acting as a real-time, on-device assistant that sees what you see (via OCR), hears what you hear (via ASR), and intelligently surfaces just-in-time suggestions—enabling fast, private, and personalized support without cloud reliance.
 
 ---
 
