@@ -1,11 +1,15 @@
 import { api } from './api.js'
 
-export const sendCaptureRequest = async (filename, sessionId = null) => {
+export const sendCaptureRequest = async (filename, sessionId = null, timestamp = null) => {
   try {
     const res = await fetch('http://localhost:8000/capture', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename })
+      body: JSON.stringify({ 
+        filename: filename,
+        sessionId: sessionId,
+        timestamp: Date.now()
+       })
     })
 
     if (!res.ok) {
@@ -29,7 +33,7 @@ export const sendCaptureRequest = async (filename, sessionId = null) => {
         // Don't fail the capture if event storage fails
       }
     }
-
+    console.log('Capture request successful:', data)
     return data
   } catch (error) {
     console.error('Capture error:', error)

@@ -11,15 +11,27 @@ from .utils import generate_uuid, serialize_metadata, deserialize_metadata
 class StorageDB:
     """SQLite database manager for the storage system."""
     
-    def __init__(self, db_path: str = "storage.db"):
+    def __init__(self, db_path: str = None):
         """Initialize database connection and create tables."""
+        if db_path is None:
+            # Use absolute path to ensure consistency
+            import os
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage.db")
         self.db_path = db_path
         self.init_database()
     
-    def init_database(self):
-        """Create database tables if they don't exist."""
+    def init_database(self, clear_existing: bool = False):
+        """Create database tables, optionally clearing existing data first."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
+            
+            if clear_existing:
+                # Drop existing tables and indexes
+                cursor.execute("DROP TABLE IF EXISTS raw_events")
+                cursor.execute("DROP TABLE IF EXISTS nodes")
+                cursor.execute("DROP INDEX IF EXISTS idx_raw_events_session")
+                cursor.execute("DROP INDEX IF EXISTS idx_nodes_session")
+                print("🗑️ Dropped existing database tables")
             
             # Create raw_events table
             cursor.execute("""
@@ -49,6 +61,9 @@ class StorageDB:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_nodes_session ON nodes(session_id)")
             
             conn.commit()
+            
+            if clear_existing:
+                print("✅ Created fresh database tables")
     
     def store_raw_event(self, session_id: str, source: str, ts: float, text: str, metadata: Dict[str, Any] = None) -> str:
         """Store a raw event from OCR or Audio pipeline."""
