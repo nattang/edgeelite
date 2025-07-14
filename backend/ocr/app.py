@@ -514,6 +514,13 @@ class EasyOCRApp_ort:
         )
         self.converter = self.ocr_reader.converter
 
+    def setup_sessions(self):
+        detector_model_path = "backend/ocr/models/detector.onnx"
+        recognizer_model_path = "backend/ocr/models/recognizer.onnx"
+
+        self.detector_session = ort.InferenceSession(self.detector_model_path)
+        self.recognizer_session = ort.InferenceSession(self.recognizer_model_path)
+
     # convert image to numpy array suitable for detector input
     def detector_preprocess(self, image_path: str):
         img = Image.open(image_path).convert("RGB")
